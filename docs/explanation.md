@@ -259,6 +259,7 @@ May be asked to justify architecture, explain a research decision, interpret a r
 15. **Docker disk usage** (past incident). Strict rules in CLAUDE.md section 9. Recommend capping BuildKit cache in Docker Desktop settings.
 16. **Global Python has torch 2.11.0+cpu installed.** Always use `.venv\Scripts\python`, otherwise training silently runs on CPU.
 17. **`gh` CLI is not installed.** Pushing uses Git Credential Manager over HTTPS. Fine, but GitHub Releases (only needed if a model > 50 MB) would need the web UI or `gh`.
+18. **Unanchored .gitignore patterns.** `data/` also matched `src/data/` (found in Phase 1 before committing; fixed to `/data/`). Before each commit, check that `git add -A -n` lists every new source file.
 
 ---
 
@@ -275,3 +276,19 @@ These were approved by the user. Each one must be stated and justified in the re
 7. **Clean vs mild-blur confusion** in the classifier is expected (kernel 3 / sigma ~0.5 barely changes a slightly soft JPEG). We measure it and discuss it in the report as a property of the data, not hide it.
 8. **Small artifacts are committed:** `artifacts/splits/`, `artifacts/manifests/`, `artifacts/optuna/*.db` (the PDF requires "Optuna studies" in the repo) and the final result tables. Check sizes first and keep each file under ~20 MB; tell the user if any is larger. Everything else in `artifacts/` (e.g. `cache/`) stays ignored.
 9. **AI-use log:** a short entry in `docs/ai_use_log.md` at the end of every phase.
+
+## 14. Phase 1 implementation decisions (2026-10-03)
+
+1. **MLflow storage:** MLflow 3.16 refuses the old plain-folder store, so runs live in `mlruns/mlflow.db` (SQLite) and files in `mlruns/artifacts/`. Both are inside the gitignored `mlruns/`. Open the UI with `.venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db` and browse to http://127.0.0.1:5000.
+2. **Corruption code is NumPy-only** (`src/corruptions.py`), with every corruption described by a JSON params dict. The manifests store these dicts, and the backend will import the same file, so training, evaluation and the app corrupt images identically.
+3. **Occlusion rectangles never overlap**, so the covered area is exactly the sum of rectangle areas (tests check coverage is within 1 percentage point of the target). Area is split randomly between rectangles; aspect ratio is between 1:2 and 2:1.
+4. **Blur** is a separable Gaussian with reflect borders. A test checks it against SciPy (max difference 1 grey level, i.e. rounding).
+5. **Resize** uses PIL bilinear (with PIL's built-in antialiasing when shrinking) for both Pet and FS2K. The app must use the same call.
+6. **Clean image cache:** `artifacts/cache/pet_{trainval,test}.npy`, 181 + 180 MB, gitignored and rebuilt by `scripts/prepare_data.py` in ~45 s. Clean images only, no corrupted copies.
+7. **Randomness:** training corruptions use a NumPy generator seeded from PyTorch's RNG, so each DataLoader worker draws different corruptions and a seeded run is repeatable.
+8. **Balanced batches:** `BalancedBatchSampler` gives exactly batch_size/4 of each condition, with a new shuffle each epoch (`set_epoch`). Batch sizes must be multiples of 4.
+9. **Manifest seeds:** the val manifest uses master seed 42, the test manifest uses 43 (separate streams). Each entry stores its own seed and full params. Re-running `prepare_data.py` checks that the outputs are byte-identical.
+10. **FS2K sketches load as 1-channel grayscale** (they are R=G=B). Training augmentation = load at 143x143, then the same random 128x128 crop and the same horizontal flip for photo and sketch (pix2pix "jitter"). A test confirms the pair stays aligned.
+11. **SSIM** is our own ~20-line implementation (11x11 Gaussian window, sigma 1.5, Wang et al. 2004), always computed in float32. A test checks it against scikit-image (difference < 0.01, from border handling).
+12. **DataLoader:** `num_workers=2` is stable on Windows (spawn) and ~35% faster than 0. Scripts are guarded with `if __name__ == "__main__":`.
+13. **Benchmark** (stand-in models): AE epoch 2.8-2.9 s (batch 32, AMP, 0.38 GB); GAN epoch 7.9 s (batch 8, fp32, 2.71 GB peak). GAN memory is the tight constraint on 4 GB.

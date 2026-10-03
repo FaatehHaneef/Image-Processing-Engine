@@ -4,7 +4,15 @@ Seven phases. Each phase ends with a summary, a git commit + push, an updated `P
 
 **Reminder (user): confirm the real submission deadline with your instructor.** The PDF date (March 16, 2024) is stale.
 
-**Time estimates are rough guesses for an RTX 3050 Ti 4 GB** and assume clean images are cached at 128x128 (see Phase 1). Phase 1 includes a one-epoch timing benchmark, and every later estimate gets updated from that real measurement before any long run starts.
+**Time estimates are based on a real benchmark** (`scripts/benchmark_epoch.py` -> `artifacts/results/benchmark_epoch.json`, run 2026-10-03 on the RTX 3050 Ti 4 GB, torch 2.14.1+cu126):
+
+| Measured | Result |
+|---|---|
+| Data pipeline (runtime corruption, CPU) | ~1,400 img/s (0 workers), ~1,900 img/s (2 workers) -> not a bottleneck |
+| Stand-in autoencoder (9.8 M params, batch 32, AMP) | **2.9 s / train epoch** (2,944 images) + 0.5 s val pass (736), peak 0.38 GB |
+| Stand-in pix2pix GAN (G 41.8 M + D 2.8 M, batch 8, fp32) | **7.9 s / epoch** (899 pairs), peak **2.71 GB** |
+
+The first epoch is ~5x slower (worker start-up, cuDNN autotune), so short trials pay that once. Estimates below add a 1.5-2x margin for larger configs, validation and MLflow logging. Each phase re-estimates before its long runs, and you're told before anything over ~30 min starts.
 
 CLAUDE.md section 0 was updated to these 7 phases (approved 2026-10-03). Approved design decisions are listed in `docs/explanation.md` section 13.
 
@@ -43,7 +51,7 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 
 **You:** review the corruption grid and the split/manifest counts. (PyTorch + driver were already done on 2026-10-03.)
 **Verify:** `pytest` passes; corruption grid looks right to you; counts: 2,944/736 split, 736 val manifest entries (184 per class), 36,690 test manifest inputs; FS2K ~899/159 split with per-style counts printed.
-**Time:** ~2-3 h of coding/review; GPU ~5 min (benchmark only).
+**Time:** ~2-3 h of coding/review; GPU ~2 min (benchmark only). DONE 2026-10-03.
 **AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 1: environment, data pipeline, corruptions, manifests, shared utilities`
 
@@ -60,7 +68,7 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 - `scripts/export_onnx.py` and `scripts/verify_onnx.py` (generic, extended in later phases) -> `models/onnx/task1_universal_ae.onnx`, `artifacts/results/onnx_verification.csv`.
 
 **Verify:** best trial reproduced by the final run; ONNX vs PyTorch max abs diff ~1e-5 or better; figures look sensible.
-**Time (estimate):** Optuna ~25-30 trials x ~8 epochs ~ 1-1.5 h; final training ~30-45 min; evaluation ~5 min.
+**Time (estimate):** Optuna ~30 trials x up to 15 epochs ~ 30-45 min (pruning cuts this); final training ~100 epochs ~ 10 min; skip ablation ~10 min; test evaluation (36,690 inputs) ~2 min. **Total GPU ~1 h.**
 **AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 2: Task 1 universal autoencoder, Optuna study, evaluation, ONNX`
 
@@ -77,7 +85,7 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 - ONNX: classifier + 3 specialists, added to verification.
 
 **Verify:** confusion matrix sane (clean/blur confusion expected and discussed); oracle >= predicted; ONNX diffs small.
-**Time (estimate):** classifier Optuna ~45 min + final ~20 min; specialist Optuna ~1 h; 3 final specialists ~1-1.5 h total.
+**Time (estimate):** classifier Optuna ~20-30 min + final ~5 min; shared specialist Optuna ~30-45 min; 3 final specialists ~10 min each; evaluation (two routing modes) ~5 min. **Total GPU ~1.5-2 h.**
 **AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 3: Task 2 classifier, specialists, hard routing evaluation, ONNX`
 
@@ -93,7 +101,7 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 - ONNX: whole MoE as **one graph** (outputs: image + 4 weights), verified.
 
 **Risks:** 4 GB VRAM with 3 AEs + gate training at once (mitigation: smaller batch, AMP, gradient accumulation); collapse; the gain over hard routing may be small (that's a valid finding, reported honestly).
-**Time (estimate):** Optuna ~1.5-2 h; final ~1 h; evaluation ~15 min.
+**Time (estimate):** one MoE step runs the gate + all 3 experts (~3-4x an AE step, ~10-15 s/epoch); Optuna ~25 trials x ~10 epochs ~ 45-60 min; final ~15-20 min; evaluation ~5 min. **Total GPU ~1-1.5 h.**
 **AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 4: Task 3 soft mixture-of-experts, routing analysis, single-graph ONNX`
 
@@ -112,7 +120,7 @@ Can be started any time after Phase 1. Its long runs can run overnight, or on Co
 - ONNX: generator only (inputs: photo + style id), verified.
 
 **Verify:** losses stay bounded; sample grids improve over time; style changes the output visibly for the same photo.
-**Time (estimate):** Optuna ~15-20 trials x ~15 epochs ~ 2-3 h; full retrain (~150-200 epochs) ~2-3 h locally.
+**Time (estimate):** Optuna ~20 trials x ~20 epochs ~ 1-1.5 h; full retrain ~200 epochs ~ 30-45 min. **Total GPU ~2 h, fine locally (Colab not needed).** Memory is the constraint: the stand-in GAN peaked at 2.71 GB at batch 8, so the search caps batch size and base channels (OOM trials are pruned automatically).
 **AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 5: Task 4 conditional GAN, Optuna, full retrain, ONNX`
 

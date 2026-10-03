@@ -1,6 +1,11 @@
 # Data, models, experiments (never commit)
-data/
-artifacts/
+/data/
+# artifacts/: ignore everything except small, reproducibility-relevant files
+artifacts/*
+!artifacts/splits/
+!artifacts/manifests/
+!artifacts/optuna/
+!artifacts/results/
 models/*
 !models/onnx/
 !models/onnx/*.onnx
