@@ -1,0 +1,261 @@
+# Knowledge base: Generative AI Assignment 1
+
+Re-read this file before every phase. Source of truth order: `docs/assignment.pdf` > `CLAUDE.md` > this file. If they disagree, the PDF wins and the conflict is reported.
+
+---
+
+## 1. The big picture
+
+We build four generative systems and put them into one web app:
+
+1. **Universal Restoration (Task 1):** one denoising autoencoder that fixes any of 3 corruptions (or leaves a clean image alone) without being told which corruption it is.
+2. **Hard-Routed Restoration (Task 2):** a classifier guesses the corruption type, then sends the image to one of 3 specialist autoencoders. A clean image goes through an identity bypass (it's returned unchanged).
+3. **Soft Mixture-of-Experts Restoration (Task 3):** the Task 2 classifier becomes a "gate" that gives a weight to all 4 branches (identity + 3 specialists). The output is the weighted sum. Gate and experts are fine-tuned together.
+4. **Face-to-Sketch Generator (Task 4):** a conditional GAN (U-Net generator + PatchGAN discriminator) that turns a face photo into a sketch in one of 3 artist styles.
+
+Tasks 1-3 use Oxford-IIIT Pet with synthetic corruptions. Task 4 uses FS2K. Every inference model is exported to ONNX. A FastAPI backend runs ONNX Runtime (CPU), a React + Tailwind frontend shows the four workspaces, and Docker Compose starts everything with one command.
+
+---
+
+## 2. Data rules
+
+### 2.1 Oxford-IIIT Pet (Tasks 1, 2, 3)
+- Development data = official `trainval` (3,680 images). Split 80/20 (2,944 / 736) with **seed 42**. Save the split once to `artifacts/splits/` and reuse it in Tasks 1, 2 and 3. Never re-split.
+- Official `test` (3,669 images) stays untouched until final evaluation. No Optuna objective, early stopping or checkpoint choice may use it.
+- Convert to RGB, resize to **128x128**. Class labels (37 breeds) are not used. The clean image is the target.
+- Only load ids listed in `trainval.txt` / `test.txt`. Ignore `._*` files, `.mat` files and the 41 unlisted jpgs.
+
+### 2.2 Training corruptions (runtime, random every time an image is loaded)
+Pick one of 4 conditions with equal probability (1/4 each); the condition index is the classifier label:
+
+| Label | Condition | Training configuration |
+|---|---|---|
+| 0 | clean | unchanged image |
+| 1 | salt-and-pepper | p ~ U(0.02, 0.15); each selected pixel becomes black or white with equal probability |
+| 2 | Gaussian blur | kernel size from {3, 5, 7}; sigma ~ U(0.5, 2.5) |
+| 3 | occlusion | 1-3 black rectangles, together covering 10%-35% of the image, random positions |
+
+Do **not** save corrupted copies of the dataset. (A cache of the *clean* 128x128 images in `artifacts/` is fine and makes loading faster.)
+
+### 2.3 Validation and test corruptions (deterministic)
+- Generate a **validation manifest** and a **test manifest** once and store them in `artifacts/manifests/`. Each entry stores: image id, corruption type, severity, mask coordinates, blur kernel/sigma, and the random seed for that image. Always reuse them.
+- **Test** = every clean test image gets **3 fixed severity levels for every corruption** (plus the clean version):
+
+| Corruption | Low | Medium | High |
+|---|---|---|---|
+| Salt-and-pepper p | 0.03 | 0.08 | 0.15 |
+| Blur (kernel, sigma) | (3, 0.7) | (5, 1.5) | (7, 2.5) |
+| Occlusion (area, rectangles) | ~10%, 1 rect | ~20%, 2 rects | ~35%, 3 rects |
+
+  That's 1 clean + 9 corrupted = 10 inputs per test image, i.e. 36,690 test inputs.
+- Results are always reported **per corruption AND per severity** (low/medium/high), and separately for clean.
+
+### 2.4 FS2K (Task 4)
+- Official train (1,058) / test (1,046) from `anno_train.json` / `anno_test.json`.
+- Hold out **15% of official train** as validation, **stratified by `style`**, **seed 42**. Test is never used in training or tuning.
+- Resize photo and sketch to 128x128. Keep pairing exact. Any spatial augmentation (flip, crop, rotation, resize) is applied **identically** to photo and sketch.
+- Style field: `style` in {0,1,2} = UI "Style 1/2/3". Details in `docs/dataset_findings.md`.
+
+---
+
+## 3. Task 1: Universal denoising autoencoder
+
+- **Architecture:** conv encoder (spatial size shrinks, channels grow) -> genuinely compressed latent bottleneck -> conv decoder back to 3x128x128 RGB. No unrestricted skip connections (that would be a U-Net that can copy the input). If limited skips are used, run an ablation and justify them in the report.
+- **Forward:** x_hat = D(E(x_tilde)), where x = clean, x_tilde = corrupted, x_hat = output.
+- **Loss:** `L_UDAE = alpha * L1(x, x_hat) + (1 - alpha) * (1 - SSIM(x, x_hat))`, starting at alpha = 0.8, final alpha chosen by Optuna.
+- **Optuna (at least):** learning rate, batch size, bottleneck dimension, number of encoder channels, dropout, alpha. The validation objective must combine reconstruction quality and structural similarity. Report: full search space, completed/pruned/failed trial counts, best trial, final config.
+- **Evaluation (test manifest):** PSNR, SSIM, L1 for clean / salt / blur / occlusion, each at low/medium/high.
+- **Visuals:** clean target | corrupted input | output | absolute error map. At least **12 representative examples** and **4 meaningful failure cases**, discussed in text.
+- **ONNX** + app workspace **"Universal Restoration"**: upload a corrupted image, or pick a clean sample and apply a corruption type + severity. Show input, output, chosen corruption settings, inference time.
+
+## 4. Task 2: Classifier + hard-routed specialists
+
+- **Classifier:** CNN, 4 classes [clean, salt, blur, occlusion], cross-entropy, **balanced batches**. Output p = C(x_tilde) = [p_clean, p_salt, p_blur, p_occlusion], prediction r = argmax_k p_k.
+  - Optuna: learning rate, batch size, channel configuration, dropout, weight decay.
+  - Report: overall accuracy, macro precision/recall/F1, per-class metrics, **normalized 4x4 confusion matrix**.
+- **Specialists:** 3 autoencoders (salt, blur, occlusion). Each trained **only on its own corruption**, clean image as target, **independent weights**. Same architecture is allowed. A shared Optuna search for the common architecture is allowed. Tune: learning rate, bottleneck size, channel config, batch size, L1-vs-SSIM weight.
+- **Hard routing:**
+  - r = clean -> x_hat = x_tilde (identity bypass, no expert)
+  - r = salt -> A_salt(x_tilde); r = blur -> A_blur(x_tilde); r = occlusion -> A_occ(x_tilde)
+- **Two evaluation modes:** oracle routing (label from the test manifest) and predicted routing (classifier). Find and discuss cases where a classifier error caused a restoration failure.
+- **ONNX:** classifier + all 3 specialists. App workspace **"Hard-Routed Restoration"**: show the 4 probabilities, predicted corruption, selected expert, output, inference time.
+
+## 5. Task 3: Soft mixture-of-experts
+
+- **Gate:** `w = softmax(G(x_tilde) / T)`, w = [w0 identity, w1 salt, w2 blur, w3 occlusion]. Temperature T: small T = sharp (near one-hot), large T = spread out.
+- **Output:** `x_hat = w0 * x_tilde + w1 * A_salt(x_tilde) + w2 * A_blur(x_tilde) + w3 * A_occ(x_tilde)`. This is differentiable, so gate and experts train together through the reconstruction error.
+- **Initialization (mandatory):** gate from the Task 2 classifier, experts from the Task 2 specialists. No random start.
+- **Stage 1 warm-up:** experts frozen, train only the gate. **Stage 2:** unfreeze everything, joint fine-tune with a **smaller** learning rate.
+- **Loss:** `L_MoE = l1_w * L1 + ssim_w * (1 - SSIM) + cls_w * CE(gate logits, true label) + bal_w * L_balance`, starting at 0.8 / 0.2 / 0.1 / 0.01.
+- **Balance loss:** `L_balance = sum_{k=0..3} (mean_w_k - 1/4)^2`, where mean_w_k = average weight of branch k over a **balanced** batch. An alternative (e.g. entropy, Switch-Transformer load-balancing loss) is allowed only with research-backed justification.
+- **Optuna:** fine-tune learning rate, temperature T, classification weight, balance weight, reconstruction weighting. Pruning is allowed for bad trials or **routing collapse**.
+- **Analysis:** average expert weight per true corruption type **and** severity; routing heatmap / weight-distribution plot; examples where one expert dominates and where weights are spread out; check for inactive experts and for one expert dominating unrelated inputs.
+- **ONNX:** export the **entire** pipeline (gate + 3 experts + identity + mixing) as **one** graph. App workspace **"Soft Mixture-of-Experts Restoration"**: show all 4 weights, the output, inference time, and a visual cue for which experts contributed most.
+
+## 6. Task 4: FS2K face-to-sketch cGAN
+
+- **Generator:** U-Net, `y_hat = G(x, s)`, x = photo, s = style. The style is a **learned categorical embedding** (3 styles) that goes **into the generator AND the discriminator** (not just a UI label).
+- **Discriminator:** PatchGAN, sees photo + style + sketch: D(x, y, s) for real, D(x, G(x, s), s) for fake. It judges local patches as real/fake.
+- **Losses:** D learns to output real for real pairs and fake for generated ones (BCE-with-logits is fine). `L_G = L_adv + lambda_L1 * L1(y, G(x, s))`, starting at lambda_L1 = 100 (pix2pix value), tuned by Optuna.
+- **Optuna (at least):** generator LR, discriminator LR, batch size, base channels, dropout, style-embedding dimension, L1 weight. Trials may use fewer epochs; then **retrain the best config on the full schedule**.
+- **Logging (separately):** D real loss, D fake loss, G adversarial loss, G L1 loss, validation metrics. Log sample images at fixed intervals using the **same validation photos** every time.
+- Save checkpoints often (GANs can diverge). Handle diverging Optuna trials gracefully (prune on NaN/explosion).
+- **ONNX:** generator only. App workspace **"Face-to-Sketch Generator"**: upload a photo or capture from webcam, choose Style 1/2/3, show photo and sketch side by side, download button.
+
+---
+
+## 7. Cross-cutting requirements
+
+### Optuna (all four tasks)
+- Persistent SQLite storage in `artifacts/optuna/` so studies can resume.
+- Short trials (few epochs, maybe a subset) + pruner (e.g. MedianPruner).
+- AMP where stable (check it doesn't destabilize the GAN).
+- Search ranges that fit 4 GB (batch <= 64 for 128x128 autoencoders, smaller for the GAN).
+- Catch `torch.cuda.OutOfMemoryError` -> `torch.cuda.empty_cache()` -> `raise optuna.TrialPruned`.
+- Report completed, pruned and failed trial counts.
+
+### Experiment tracking (MLflow)
+- Local MLflow (`mlruns/`, gitignored) from the first training script. One experiment per task. Log params, per-epoch losses, metrics, checkpoints, sample images. Each Optuna trial = an MLflow run nested under a parent run per study.
+- The demo video must show the experiment-tracking records (MLflow UI).
+
+### ONNX
+- Models: Task 1 AE, classifier, 3 specialists, full soft-MoE, Task 4 generator (7 files).
+- `model.eval()` before export. Fixed 128x128 input, dynamic batch axis OK.
+- `scripts/verify_onnx.py`: ONNX Runtime vs PyTorch on real samples, report max/mean absolute difference, save results for the report.
+- Files go in `models/onnx/`, committed directly (no LFS). Report file sizes. If any is > 50 MB: GitHub Release + download script instead.
+
+### Application
+- One app, four workspaces with the **exact names**:
+  - **Universal Restoration**
+  - **Hard-Routed Restoration**
+  - **Soft Mixture-of-Experts Restoration**
+  - **Face-to-Sketch Generator**
+- Design first in **Google Stitch** (done by the user; screenshots go in the report). Don't invent a different design.
+- Frontend: React + Tailwind. Backend: FastAPI + ONNX Runtime (CPU).
+- **Minimum backend endpoints** (exact paths decided in Phase 6):
+  - health check (`GET /health`: which models loaded; detect Git LFS pointer files instead of real ONNX files)
+  - universal restoration
+  - hard routing
+  - soft mixture
+  - face-to-sketch
+  - plus helpers the UI needs (list samples, apply corruption)
+- Backend validates uploads (type, size, decodable image), preprocesses, runs ONNX, returns output + routing info + timing.
+- Frontend features: upload, pick a clean sample, apply chosen corruption + severity, upload an already-corrupted image, show classifier probabilities and mixture weights, webcam for Task 4, download button, inference time.
+- 15-20 small sample images bundled in `backend/samples/` so the app works on a fresh clone without `data/`.
+- In Compose the frontend reaches the backend via service name or a proxy (not `localhost`). Configure CORS.
+
+### Docker (see CLAUDE.md section 9; follow it strictly)
+- Frontend and backend in containers; one documented `docker compose up` command.
+- `docker info` before anything; `docker system df` before/after builds; stop if C: free < 15 GB; max 2 build attempts per problem; build timeout ~10 min; `.dockerignore` in every context; slim pinned base images; multi-stage; no PyTorch in the backend; models mounted read-only (`./models/onnx:/app/models:ro`); healthchecks; log rotation; no pruning without asking.
+- The evaluator must be able to: clone, get models, start containers, open the browser, with no VS Code and no manual Python scripts.
+
+### Repository contents (required)
+Source code, configs, `requirements.txt`, data-prep scripts, training scripts, evaluation scripts, Optuna studies, ONNX export code, app code, Dockerfiles, Compose file, README with complete execution instructions. No datasets, no large model files.
+
+### Report (IEEE LaTeX, written by the user)
+- Sections: introduction, related research, dataset preparation, architecture, losses, training, Optuna design, experimental setup, results, analysis, application architecture, limitations, conclusion. Each task gets its own clearly identifiable methodology and results.
+- Must include: architecture diagrams, full corruption configuration, train/val curves, Optuna results, confusion matrices, result tables, routing-weight visualizations, generated-image grids, error maps, app screenshots, failure cases, Stitch evidence, GitHub link, YouTube link.
+- **Every figure/table must be interpreted in the text.** Explain alternatives investigated, why choices were made, difficulties, and how research/experiments resolved them.
+- **AI-use appendix:** tools used, what for, how outputs were tested or corrected (we keep `docs/ai_use_log.md` running).
+
+### Video (user)
+5-7 minutes on YouTube (link only in report). Must show: app startup, image upload, runtime corruption, universal restoration, hard routing, soft expert weights, face-to-sketch, result download, experiment-tracking records.
+
+### Viva (live)
+May be asked to justify architecture, explain a research decision, interpret a result, **modify part of the code**, or run the app on **unseen images**, including restarting the app from the repo. So code stays simple and every decision is explained.
+
+---
+
+## 8. Key formulas (plain text)
+
+- Autoencoder: `x_hat = D(E(x_tilde))`
+- Restoration loss: `L = alpha * L1(x, x_hat) + (1 - alpha) * (1 - SSIM(x, x_hat))`
+- Classifier: `p = softmax(C(x_tilde))`, `r = argmax_k p_k`, loss = cross-entropy
+- Gate: `w = softmax(G(x_tilde) / T)`
+- Soft-MoE output: `x_hat = w0*x_tilde + w1*A_salt(x_tilde) + w2*A_blur(x_tilde) + w3*A_occ(x_tilde)`
+- MoE loss: `L = l1_w*L1 + ssim_w*(1 - SSIM) + cls_w*CE + bal_w*L_balance` (start 0.8, 0.2, 0.1, 0.01)
+- Balance: `L_balance = sum_k (mean_w_k - 1/4)^2` over a balanced batch
+- cGAN discriminator: `L_D = BCE(D(x, y, s), 1) + BCE(D(x, G(x, s), s), 0)` (logged as "D real" and "D fake")
+- cGAN generator: `L_G = BCE(D(x, G(x, s), s), 1) + lambda_L1 * L1(y, G(x, s))` (start lambda_L1 = 100)
+- PSNR (images in [0,1]): `PSNR = 10 * log10(1 / MSE)`
+
+---
+
+## 9. Context and constraints from planning (not in the PDF)
+
+- Windows 11, PowerShell, VS Code. Project at `C:\dev\gen-ai-ass1`, deliberately outside OneDrive. Never move it back.
+- GPU: NVIDIA GeForce RTX 3050 Ti Laptop, 4 GB VRAM. Driver 512.77 (CUDA 11.6) as of 2026-10-03.
+- Training + Optuna run in a local `.venv`, not Docker. Docker is only for the inference app (CPU onnxruntime). Verify `torch.cuda.is_available()`; never silently fall back to CPU. Ask before large downloads/installs.
+- Colab/Kaggle may be used for heavy runs (e.g. Task 4 full retrain).
+- Docker Desktop 28.3.2, Compose v2.38.2, ~7.6 GB RAM. A past build loop filled the disk, so the Docker safety rules are strict.
+- Raw data under `data/` is READ-ONLY. Derived files go to `artifacts/`. Archive backups are in `C:\dataset-backup` (do not touch).
+- No hosting (no Vercel). Local Docker Compose only (compulsory).
+- The PDF deadline (March 16, 2024) is stale; ignore it.
+- GitHub repo: `https://github.com/FaatehHaneef/Image-Processing-Engine` (branch `main`).
+- ONNX models committed directly in `models/onnx/` (no LFS) unless > 50 MB. Checkpoints stay gitignored.
+- Fresh-clone requirement: `git clone`, one documented `docker compose` command, open the browser, working within minutes. `/health` reports loaded models and detects LFS pointer files. A fresh-clone test is done at the end.
+- The user does: Google Stitch design, YouTube video, IEEE LaTeX report, AI-use appendix. Claude prepares figures, tables, result files and `docs/ai_use_log.md` entries, and reminds the user when these are due.
+- Never fabricate results; every report number comes from a real logged run.
+- Communication: plain, concise, exact commands, at most one question at a time.
+
+---
+
+## 10. Dataset findings (summary; full details in `docs/dataset_findings.md`)
+
+- **Pet:** trainval 3,680, test 3,669, none missing or unreadable, no overlap. 3 listed images are RGBA with fully opaque alpha (`.convert("RGB")` is safe). Sizes range from 114x108 to 3264x2606. The 80/20 seed-42 split gives 2,944 / 736.
+- **FS2K:** train 1,058 (style 357/350/351), test 1,046 (style 619/381/46). Label field `style` in {0,1,2}. Pairing: `photo/photoN/imageXXXX` -> `sketch/sketchN/sketchXXXX`, with mixed `.jpg`/`.JPG`/`.png`. All pairs exist and have matching sizes. Sketches are grayscale. Style is confounded with photo source (style 2 = photo2/photo3 only, in train). The stratified 15% val split (~159 images) is feasible.
+
+---
+
+## 11. Glossary (viva)
+
+- **Autoencoder:** a network that compresses an input into a small code (encoder) and rebuilds an image from that code (decoder). A *denoising* autoencoder gets a corrupted input and is trained to output the clean version.
+- **Bottleneck / latent:** the smallest internal representation between encoder and decoder. Because it's small, the network must keep only the important content instead of copying pixels.
+- **Skip connection:** a shortcut passing encoder features straight to the decoder. Unrestricted skips let the network bypass the bottleneck (copy the input), which is why the assignment limits them.
+- **L1 loss:** mean absolute pixel difference. Robust and gives sharper results than L2/MSE.
+- **SSIM:** Structural Similarity Index. Compares local brightness, contrast and structure in small windows; 1 means identical. `1 - SSIM` is used as a loss.
+- **PSNR:** Peak Signal-to-Noise Ratio, in dB, derived from MSE. Higher is better.
+- **Salt-and-pepper noise:** random pixels forced to pure black or pure white. **Gaussian blur:** each pixel replaced by a Gaussian-weighted average of its neighbours. **Occlusion:** parts of the image hidden by black boxes, so the model must "inpaint" them.
+- **Manifest:** a saved file listing exactly which corruption (with all parameters and seed) is applied to each val/test image, so evaluation is repeatable.
+- **Hard routing:** pick exactly one expert (argmax of the classifier). Fast, but a wrong classification sends the image to the wrong expert.
+- **Soft routing / mixture-of-experts (MoE):** a gate gives every expert a weight, and the output is the weighted sum. It's differentiable, so the gate can be trained by the reconstruction loss, and uncertain or mixed inputs can blend experts.
+- **Gate:** the small network that produces the routing weights (here: the Task 2 classifier).
+- **Temperature (T):** divides the logits before softmax. Low T makes weights sharper (closer to hard routing); high T makes them more even.
+- **Routing collapse:** the gate sends almost everything to one expert (or never uses one), so the other experts stop learning. A balance loss counteracts it.
+- **Balance loss:** a penalty that grows when the average weight per branch drifts away from equal use (1/4 each) over a balanced batch.
+- **Identity branch:** a "do nothing" expert that returns the input. The correct choice for clean images.
+- **GAN:** a generator makes images and a discriminator tries to tell real from fake; they train against each other.
+- **cGAN (conditional GAN):** both networks also receive a condition (here: the photo and the style), so the output must match that condition.
+- **pix2pix:** the standard paired image-to-image cGAN (U-Net generator, PatchGAN discriminator, adversarial + lambda * L1 loss, lambda = 100).
+- **U-Net:** encoder-decoder with skip connections at every level. Good for image-to-image tasks where the output aligns with the input (the photo and sketch share layout). Allowed in Task 4, not as a plain copy path in Task 1.
+- **PatchGAN:** a discriminator that outputs a grid of real/fake scores, one per local patch (e.g. 70x70 receptive field), instead of one score per image. It focuses on local texture and sharpness.
+- **Style embedding:** a learned vector (one per style) that is fed into the networks so they know which style to produce/judge.
+- **Mode collapse / divergence:** GAN failure modes. The generator produces nearly the same output for everything, or the losses blow up. Frequent checkpoints guard against both.
+- **Optuna:** a hyperparameter-search library. A *study* runs many *trials*, each with sampled hyperparameters (TPE sampler by default).
+- **Optuna pruning:** stopping a trial early when its intermediate validation score is worse than others at the same step (MedianPruner), which saves GPU time. We also prune on CUDA out-of-memory.
+- **AMP (mixed precision):** running parts of training in float16 to save memory and time.
+- **MLflow:** experiment tracker that logs parameters, metrics, images and checkpoints per run, with a web UI.
+- **ONNX:** an open, framework-independent file format for trained networks. **ONNX Runtime** runs it fast on CPU without PyTorch, which is why the Docker image stays small.
+- **FastAPI:** Python web framework for the backend API. **React + Tailwind:** frontend library + utility-class CSS framework. **Docker Compose:** starts several containers (frontend, backend) with one command.
+
+---
+
+## 12. Risks and traps
+
+1. **GPU driver too old.** Driver 512.77 (CUDA 11.6) cannot run current PyTorch CUDA 12/13 builds (current stable 2.14.1 ships cu126/cu130). The newest build that runs on CUDA 11.x drivers is torch 2.7.1+cu118. Updating the NVIDIA driver is the clean fix.
+2. **Optuna objective must not depend on a tuned loss weight.** If the objective were the training loss itself, Optuna could "win" by changing alpha (or lambda_L1, or MoE weights) rather than improving restoration. Use a fixed objective, e.g. a fixed mix of val L1 and val SSIM, or PSNR/SSIM.
+3. **Clean vs mild blur look alike.** Blur with kernel 3, sigma ~0.5 barely changes an image (and Pet JPEGs are already slightly soft). Expect clean/blur confusion in the classifier. Same for very low salt probability vs clean. This is a real failure source to discuss, not a bug.
+4. **Occlusion area control.** Rectangles must jointly cover 10-35% (test: ~10/20/35% with 1/2/3 rects). Overlapping rectangles would under-count the area, so we generate non-overlapping rects and store exact coordinates in the manifest.
+5. **Salt-and-pepper definition.** We treat a "pixel" as all 3 channels at once (the whole pixel turns black or white), not per channel. State this in the report.
+6. **Balanced batches.** Random 1/4 sampling is only balanced on average. For the classifier (and the MoE balance loss) we enforce exact balance: each batch has B/4 of each condition.
+7. **Validation manifest design is not specified in the PDF.** Proposal: each val image gets one condition, exactly 184 per condition, severity drawn from the training ranges with a stored per-image seed. (Alternative: all 10 test-style variants per val image, which is closer to test but 4x slower per Optuna epoch.)
+8. **Data loading speed on Windows.** Decoding large JPEGs every epoch with `num_workers=0-2` would bottleneck the GPU. Plan: cache clean 128x128 uint8 arrays in `artifacts/cache/` (~180 MB for trainval) and corrupt on the fly. That isn't a "corrupted copy", so it's allowed.
+9. **Aspect ratio.** Direct 128x128 resize distorts non-square images (Pet and FS2K photo2/photo3). Literal reading of the PDF = direct resize. Must be identical between training and the app.
+10. **FS2K style confound + tiny style-2 test set (46).** The GAN may tie style to photo source. Report per-style results with this caveat.
+11. **Webcam in the browser** only works in a secure context. `http://localhost` qualifies; a LAN IP does not.
+12. **ONNX export of the soft-MoE** must include the identity branch, softmax with T, and the weighted sum in one graph. Verify the graph returns both the image and the weights.
+13. **Train/serve skew:** the backend must use exactly the same preprocessing (RGB, resize method, [0,1] scaling) and the same corruption code as training. Share/port the corruption code carefully and test it against the PyTorch version.
+14. **AMP + SSIM / GAN:** SSIM in float16 can be unstable. Compute losses in float32; disable AMP for the GAN if losses spike.
+15. **Docker disk usage** (past incident). Strict rules in CLAUDE.md section 9. Recommend capping BuildKit cache in Docker Desktop settings.
+16. **Global Python has torch 2.11.0+cpu installed.** Always use `.venv\Scripts\python`, otherwise training silently runs on CPU.
+17. **`gh` CLI is not installed.** Pushing uses Git Credential Manager over HTTPS. Fine, but GitHub Releases (only needed if a model > 50 MB) would need the web UI or `gh`.
