@@ -1,10 +1,12 @@
 # Implementation plan
 
-Seven phases. Each phase ends with a summary, a git commit + push, an updated `PROGRESS.md`, and a STOP for review. Re-read `docs/explanation.md` at the start of every phase.
+Seven phases. Each phase ends with a summary, a git commit + push, an updated `PROGRESS.md`, and a STOP for review. Re-read `docs/explanation.md` at the start of every phase. Every phase also adds a short entry to `docs/ai_use_log.md` (what AI produced, how it was checked).
+
+**Reminder (user): confirm the real submission deadline with your instructor.** The PDF date (March 16, 2024) is stale.
 
 **Time estimates are rough guesses for an RTX 3050 Ti 4 GB** and assume clean images are cached at 128x128 (see Phase 1). Phase 1 includes a one-epoch timing benchmark, and every later estimate gets updated from that real measurement before any long run starts.
 
-Note: CLAUDE.md section 0 lists 10 phases. This plan merges them into 7 (as requested). Once this plan is approved, CLAUDE.md section 0 should be updated to match (with your OK).
+CLAUDE.md section 0 was updated to these 7 phases (approved 2026-10-03). Approved design decisions are listed in `docs/explanation.md` section 13.
 
 ## Dependency overview
 
@@ -37,11 +39,12 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 - `scripts/preview_corruptions.py` -> `docs/figures/corruption_grid.png` (all corruptions x severities, for the report).
 - `scripts/benchmark_epoch.py`: times one epoch of a small AE to calibrate all estimates.
 - `tests/`: corruption parameter ranges, occlusion area within tolerance, manifest determinism (regenerate -> identical), split reuse, FS2K pairing.
-- `docs/ai_use_log.md` entry.
+- `.gitignore` exception so `artifacts/splits/`, `artifacts/manifests/` and later `artifacts/optuna/*.db` + final result tables are committed (sizes checked first; each under ~20 MB, otherwise tell the user).
 
-**You:** approve the PyTorch install (~2.5-3 GB download), and update the GPU driver if you choose that route.
+**You:** review the corruption grid and the split/manifest counts. (PyTorch + driver were already done on 2026-10-03.)
 **Verify:** `pytest` passes; corruption grid looks right to you; counts: 2,944/736 split, 736 val manifest entries (184 per class), 36,690 test manifest inputs; FS2K ~899/159 split with per-style counts printed.
 **Time:** ~2-3 h of coding/review; GPU ~5 min (benchmark only).
+**AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 1: environment, data pipeline, corruptions, manifests, shared utilities`
 
 ---
@@ -58,6 +61,7 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 
 **Verify:** best trial reproduced by the final run; ONNX vs PyTorch max abs diff ~1e-5 or better; figures look sensible.
 **Time (estimate):** Optuna ~25-30 trials x ~8 epochs ~ 1-1.5 h; final training ~30-45 min; evaluation ~5 min.
+**AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 2: Task 1 universal autoencoder, Optuna study, evaluation, ONNX`
 
 ---
@@ -74,6 +78,7 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 
 **Verify:** confusion matrix sane (clean/blur confusion expected and discussed); oracle >= predicted; ONNX diffs small.
 **Time (estimate):** classifier Optuna ~45 min + final ~20 min; specialist Optuna ~1 h; 3 final specialists ~1-1.5 h total.
+**AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 3: Task 2 classifier, specialists, hard routing evaluation, ONNX`
 
 ---
@@ -89,6 +94,7 @@ Highest risk / time cost: **P4 (soft-MoE: joint training, collapse, single-graph
 
 **Risks:** 4 GB VRAM with 3 AEs + gate training at once (mitigation: smaller batch, AMP, gradient accumulation); collapse; the gain over hard routing may be small (that's a valid finding, reported honestly).
 **Time (estimate):** Optuna ~1.5-2 h; final ~1 h; evaluation ~15 min.
+**AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 4: Task 3 soft mixture-of-experts, routing analysis, single-graph ONNX`
 
 ---
@@ -107,6 +113,7 @@ Can be started any time after Phase 1. Its long runs can run overnight, or on Co
 
 **Verify:** losses stay bounded; sample grids improve over time; style changes the output visibly for the same photo.
 **Time (estimate):** Optuna ~15-20 trials x ~15 epochs ~ 2-3 h; full retrain (~150-200 epochs) ~2-3 h locally.
+**AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 5: Task 4 conditional GAN, Optuna, full retrain, ONNX`
 
 ---
@@ -122,6 +129,7 @@ Can be started any time after Phase 1. Its long runs can run overnight, or on Co
 
 **Verify:** backend tests pass; all four workspaces work locally (`uvicorn` + `npm run dev`) on unseen images; results match the ONNX verification.
 **Time:** ~1-2 days of coding/review, no GPU.
+**AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 6: FastAPI backend and React/Tailwind frontend`
 
 ---
@@ -136,9 +144,10 @@ Can be started any time after Phase 1. Its long runs can run overnight, or on Co
 - Report material in `docs/figures/` and `artifacts/results/`: all tables (CSV + LaTeX), figures, Optuna summaries (search space, completed/pruned/failed counts, best trial), ONNX sizes and verification table, architecture diagrams.
 - `docs/ai_use_log.md` complete.
 
-**You:** YouTube demo (5-7 min, checklist provided), IEEE LaTeX report, AI-use appendix.
+**You:** YouTube demo (5-7 min, checklist provided), IEEE LaTeX report, AI-use appendix. Re-confirm the deadline with your instructor.
 **Verify:** fresh clone works with one command; `/health` all green; `docker system df` before/after reported.
 **Time:** ~0.5-1 day; Docker builds ~5-10 min each.
+**AI-use log:** add this phase's entry to `docs/ai_use_log.md`.
 **Commit:** `Phase 7: Docker Compose, README, report material`
 
 ---
@@ -166,4 +175,4 @@ report/        IEEE LaTeX source (you write it; we provide figures/tables)
 docker-compose.yml  README.md  PROGRESS.md  requirements.txt
 ```
 
-Open question to settle later (not blocking): `artifacts/` is fully gitignored, but the split and manifest JSON files are small (~1-5 MB) and make results reproducible. I suggest committing `artifacts/splits/` and `artifacts/manifests/` (and the final result CSVs) via a `.gitignore` exception in Phase 1. Same for the Optuna SQLite files, which the PDF lists as required repo contents ("Optuna studies").
+Committed artifacts (approved): `artifacts/splits/`, `artifacts/manifests/`, `artifacts/optuna/*.db`, and final result tables, each checked to be under ~20 MB. `artifacts/cache/` and everything else in `artifacts/` stay ignored.

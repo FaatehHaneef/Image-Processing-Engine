@@ -184,13 +184,13 @@ May be asked to justify architecture, explain a research decision, interpret a r
 ## 9. Context and constraints from planning (not in the PDF)
 
 - Windows 11, PowerShell, VS Code. Project at `C:\dev\gen-ai-ass1`, deliberately outside OneDrive. Never move it back.
-- GPU: NVIDIA GeForce RTX 3050 Ti Laptop, 4 GB VRAM. Driver 512.77 (CUDA 11.6) as of 2026-10-03.
+- GPU: NVIDIA GeForce RTX 3050 Ti Laptop, 4 GB VRAM. Driver 616.92 (CUDA 13.4) since 2026-10-03.
 - Training + Optuna run in a local `.venv`, not Docker. Docker is only for the inference app (CPU onnxruntime). Verify `torch.cuda.is_available()`; never silently fall back to CPU. Ask before large downloads/installs.
 - Colab/Kaggle may be used for heavy runs (e.g. Task 4 full retrain).
 - Docker Desktop 28.3.2, Compose v2.38.2, ~7.6 GB RAM. A past build loop filled the disk, so the Docker safety rules are strict.
 - Raw data under `data/` is READ-ONLY. Derived files go to `artifacts/`. Archive backups are in `C:\dataset-backup` (do not touch).
 - No hosting (no Vercel). Local Docker Compose only (compulsory).
-- The PDF deadline (March 16, 2024) is stale; ignore it.
+- The PDF deadline (March 16, 2024) is stale; ignore it for planning. **Reminder for the user: confirm the real deadline with the instructor.**
 - GitHub repo: `https://github.com/FaatehHaneef/Image-Processing-Engine` (branch `main`).
 - ONNX models committed directly in `models/onnx/` (no LFS) unless > 50 MB. Checkpoints stay gitignored.
 - Fresh-clone requirement: `git clone`, one documented `docker compose` command, open the browser, working within minutes. `/health` reports loaded models and detects LFS pointer files. A fresh-clone test is done at the end.
@@ -242,15 +242,15 @@ May be asked to justify architecture, explain a research decision, interpret a r
 
 ## 12. Risks and traps
 
-1. **GPU driver too old.** Driver 512.77 (CUDA 11.6) cannot run current PyTorch CUDA 12/13 builds (current stable 2.14.1 ships cu126/cu130). The newest build that runs on CUDA 11.x drivers is torch 2.7.1+cu118. Updating the NVIDIA driver is the clean fix.
-2. **Optuna objective must not depend on a tuned loss weight.** If the objective were the training loss itself, Optuna could "win" by changing alpha (or lambda_L1, or MoE weights) rather than improving restoration. Use a fixed objective, e.g. a fixed mix of val L1 and val SSIM, or PSNR/SSIM.
+1. **GPU driver too old.** RESOLVED 2026-10-03: driver updated to 616.92 (CUDA 13.4); using torch 2.14.1+cu126.
+2. **Optuna objective must not depend on a tuned loss weight.** If the objective were the training loss itself, Optuna could "win" by changing alpha (or lambda_L1, or MoE weights) rather than improving restoration. Use a fixed objective, e.g. a fixed mix of val L1 and val SSIM, or PSNR/SSIM. DECIDED: see section 13, item 6.
 3. **Clean vs mild blur look alike.** Blur with kernel 3, sigma ~0.5 barely changes an image (and Pet JPEGs are already slightly soft). Expect clean/blur confusion in the classifier. Same for very low salt probability vs clean. This is a real failure source to discuss, not a bug.
 4. **Occlusion area control.** Rectangles must jointly cover 10-35% (test: ~10/20/35% with 1/2/3 rects). Overlapping rectangles would under-count the area, so we generate non-overlapping rects and store exact coordinates in the manifest.
 5. **Salt-and-pepper definition.** We treat a "pixel" as all 3 channels at once (the whole pixel turns black or white), not per channel. State this in the report.
 6. **Balanced batches.** Random 1/4 sampling is only balanced on average. For the classifier (and the MoE balance loss) we enforce exact balance: each batch has B/4 of each condition.
-7. **Validation manifest design is not specified in the PDF.** Proposal: each val image gets one condition, exactly 184 per condition, severity drawn from the training ranges with a stored per-image seed. (Alternative: all 10 test-style variants per val image, which is closer to test but 4x slower per Optuna epoch.)
+7. **Validation manifest design is not specified in the PDF.** DECIDED: one condition per val image, 184 per class (section 13, item 4).
 8. **Data loading speed on Windows.** Decoding large JPEGs every epoch with `num_workers=0-2` would bottleneck the GPU. Plan: cache clean 128x128 uint8 arrays in `artifacts/cache/` (~180 MB for trainval) and corrupt on the fly. That isn't a "corrupted copy", so it's allowed.
-9. **Aspect ratio.** Direct 128x128 resize distorts non-square images (Pet and FS2K photo2/photo3). Literal reading of the PDF = direct resize. Must be identical between training and the app.
+9. **Aspect ratio.** Direct 128x128 resize distorts non-square images (Pet and FS2K photo2/photo3). Literal reading of the PDF = direct resize. Must be identical between training and the app. DECIDED: direct resize (section 13, item 5).
 10. **FS2K style confound + tiny style-2 test set (46).** The GAN may tie style to photo source. Report per-style results with this caveat.
 11. **Webcam in the browser** only works in a secure context. `http://localhost` qualifies; a LAN IP does not.
 12. **ONNX export of the soft-MoE** must include the identity branch, softmax with T, and the weighted sum in one graph. Verify the graph returns both the image and the weights.
@@ -259,3 +259,19 @@ May be asked to justify architecture, explain a research decision, interpret a r
 15. **Docker disk usage** (past incident). Strict rules in CLAUDE.md section 9. Recommend capping BuildKit cache in Docker Desktop settings.
 16. **Global Python has torch 2.11.0+cpu installed.** Always use `.venv\Scripts\python`, otherwise training silently runs on CPU.
 17. **`gh` CLI is not installed.** Pushing uses Git Credential Manager over HTTPS. Fine, but GitHub Releases (only needed if a model > 50 MB) would need the web UI or `gh`.
+
+---
+
+## 13. Approved design decisions (2026-10-03)
+
+These were approved by the user. Each one must be stated and justified in the report.
+
+1. **Phases:** 7 phases as in `docs/implementation_plan.md` (CLAUDE.md section 0 updated to match).
+2. **PyTorch:** NVIDIA driver updated to 616.92 (CUDA 13.4), so we use torch 2.14.1+cu126 in `.venv`.
+3. **ONNX files** are committed directly to `models/onnx/` (no LFS). If any file is over 50 MB, tell the user first.
+4. **Validation manifest:** each of the 736 validation images gets exactly **one** condition, **184 per class** (clean / salt / blur / occlusion). Severity is drawn from the *training* ranges using a per-image seed stored in the manifest. Why: it matches the training distribution, keeps classes exactly balanced (important for classifier metrics and the MoE balance check), and keeps Optuna validation fast (736 inputs instead of 7,360). The test manifest still uses the full fixed 3-severity scheme.
+5. **Resizing:** direct resize to 128x128 (no crop, no padding), as the PDF literally says. Limitation to document: non-square images are squashed (Pet sizes vary widely; FS2K photo2 is 223x318 and photo3 is 475x340). The app applies the identical resize, so training and serving match. For FS2K, photo and sketch are squashed identically, so pairing stays exact.
+6. **Optuna objective (Tasks 1-3):** a fixed score `0.5 * val_L1 + 0.5 * (1 - val_SSIM)` that does **not** depend on the tuned loss weight (alpha / L1-SSIM weight / MoE weights). Why: if the objective were the training loss itself, Optuna could lower the score just by changing alpha (e.g. towards the term that is numerically smaller) without the images getting any better. A fixed yardstick makes trials comparable. Task 4 uses its own fixed validation score, not the GAN loss.
+7. **Clean vs mild-blur confusion** in the classifier is expected (kernel 3 / sigma ~0.5 barely changes a slightly soft JPEG). We measure it and discuss it in the report as a property of the data, not hide it.
+8. **Small artifacts are committed:** `artifacts/splits/`, `artifacts/manifests/`, `artifacts/optuna/*.db` (the PDF requires "Optuna studies" in the repo) and the final result tables. Check sizes first and keep each file under ~20 MB; tell the user if any is larger. Everything else in `artifacts/` (e.g. `cache/`) stays ignored.
+9. **AI-use log:** a short entry in `docs/ai_use_log.md` at the end of every phase.

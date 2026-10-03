@@ -5,8 +5,8 @@ Read `docs/assignment.pdf` fully before writing any code. It is the source of tr
 ## 0. Working style
 
 - Work in phases. Finish one phase, summarize, and STOP for my review. Do not start the next phase on your own.
-- Phases: (1) scaffold + data + corruption + manifests, (2) Task 1, (3) Task 2, (4) Task 3, (5) Task 4, (6) ONNX export + consistency checks, (7) FastAPI backend, (8) React/Tailwind frontend, (9) Docker Compose, (10) README + report material.
-- Commit to git after each phase with a clear message.
+- Phases (details in `docs/implementation_plan.md`): (1) foundation: env + data + corruption + manifests + shared utilities, (2) Task 1 + ONNX export/verify tooling, (3) Task 2, (4) Task 3, (5) Task 4, (6) FastAPI backend + React/Tailwind frontend, (7) Docker Compose + fresh-clone test + README + report material. Each task phase exports and verifies its own ONNX models.
+- Commit to git after each phase with a clear message. Add a short entry to `docs/ai_use_log.md` for every phase.
 - Keep `PROGRESS.md` updated (done / in progress / next / known issues) so a new session can resume.
 - NEVER fabricate numbers. Every metric in the report must come from a real logged run. If something has not been run, say so.
 - Ask before any destructive action (deleting files, pruning Docker, overwriting checkpoints).
