@@ -1,0 +1,29 @@
+# Data, models, experiments (never commit)
+data/
+artifacts/
+models/*
+!models/onnx/
+!models/onnx/*.onnx
+mlruns/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.zip
+*.tar.gz
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Secrets and OS junk
+.env
+*.env
+.DS_Store
+Thumbs.db
