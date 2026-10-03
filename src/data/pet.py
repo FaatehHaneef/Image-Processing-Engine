@@ -66,6 +66,30 @@ def load_cached(name: str, ids: list[str]) -> np.ndarray:
     return np.ascontiguousarray(arr[[index[i] for i in ids]])
 
 
+class CachedImages:
+    """Lazy, memory-mapped view of some images in the cache (behaves like an array of images).
+
+    On Windows each DataLoader worker is a fresh process and receives a pickled copy of the
+    dataset. Passing a 145 MB array makes every worker start slowly; this object only pickles the
+    file name and the row numbers, and each worker memory-maps the .npy file itself.
+    """
+
+    def __init__(self, name: str, ids: list[str]):
+        index = {i: n for n, i in enumerate(load_json(C.CACHE / f"pet_{name}_ids.json"))}
+        self.name, self.rows, self._arr = name, [index[i] for i in ids], None
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, i):
+        if self._arr is None:
+            self._arr = np.load(cache_path(self.name), mmap_mode="r")
+        return np.asarray(self._arr[self.rows[i]])
+
+    def __getstate__(self):  # don't pickle the open memory map
+        return {**self.__dict__, "_arr": None}
+
+
 class PetTrainDataset(Dataset):
     """Training data with runtime corruption.
 

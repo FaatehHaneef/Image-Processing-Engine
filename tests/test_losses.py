@@ -48,3 +48,10 @@ def test_safe_objective_turns_errors_into_pruned():
     study.optimize(safe_objective(diverge), n_trials=1)
     assert [t.state for t in study.trials] == [optuna.trial.TrialState.PRUNED] * 2
     assert study.trials[0].user_attrs["pruned_reason"] == "cuda_oom"
+
+
+def test_ssim_matches_skimage_on_real_images():
+    """Real validation images (all 4 conditions): our SSIM equals scikit-image up to float32 rounding."""
+    from scripts.check_ssim import compare
+    result = compare(per_condition=10)
+    assert result["max_abs_diff"] < 1e-4

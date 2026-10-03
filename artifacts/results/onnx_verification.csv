@@ -1,0 +1,2 @@
+model,n_images,max_abs_diff,mean_abs_diff,batch1_max_abs_diff,passed
+task1_universal_ae,64,4.0531158447265625e-06,5.7382379736736766e-08,5.364418029785156e-07,True

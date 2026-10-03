@@ -22,11 +22,20 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
   - Benchmark (logged to MLflow `phase1-benchmark`): AE 2.8-2.9 s/epoch, GAN 7.9 s/epoch (2.71 GB peak). Plan estimates updated.
   - Fixed `.gitignore`: `data/` was also hiding `src/data/` -> now `/data/`.
 
+- **Phase 2, Task 1 universal autoencoder (2026-10-03)**
+  - SSIM checked vs scikit-image on 160 real images: max diff 1.9e-5 (`artifacts/results/ssim_check.json`).
+  - Model: conv encoder 128->8 px, 8x8xc latent (no skips), upsample+conv decoder. Best: base 64, bottleneck 2048 (24x compression), 7.12 M params.
+  - Optuna `task1` (artifacts/optuna/task1.db): 30 trials = 16 completed, 14 pruned, 0 failed (0 OOM); best trial #24, val score 0.1495; ~70 min. Best params in `configs/task1.yaml` (lr 5.8e-4, batch 16, dropout 0.013, alpha 0.558).
+  - Final training: 100 epochs (~25 min), best epoch 96: val score 0.1067, SSIM 0.8215, PSNR 26.11.
+  - Test (36,690 inputs, run once): all corrupted inputs PSNR 19.71 -> 25.55 dB, SSIM 0.639 -> 0.806. Salt +10.8 dB; occlusion +8.9 dB; blur -2.1 dB overall (low/medium blur made worse); clean 27.29 dB / 0.849 (quality lost on clean input). Full table: `artifacts/results/task1_test_summary.csv` / `.tex`.
+  - Figures: `docs/figures/task1_{curves,examples,failures,optuna_history,optuna_importance}.png`.
+  - ONNX `models/onnx/task1_universal_ae.onnx` 28.55 MB; vs PyTorch max diff 4.05e-6, mean 5.7e-8 (PASS).
+
 ## In progress
-- Waiting for go-ahead to start Phase 2.
+- Waiting for go-ahead to start Phase 3.
 
 ## Next
-- Phase 2: Task 1 universal autoencoder (model, Optuna, final training, evaluation, ONNX export + verify tooling).
+- Phase 3: Task 2 classifier + 3 specialists (hard routing). NOTE: Task 3 exports 3 specialists in ONE ONNX file -> keep the specialist search space small enough (base channels <= 32/48) so that file stays under 50 MB.
 
 ## Known issues / decisions pending
 - Global Python 3.11.7 has `torch 2.11.0+cpu`. Always use `.venv`.
@@ -34,6 +43,7 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
 - MLflow UI: `.venv\Scripts\mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db`
 - After a fresh clone, run `scripts/prepare_data.py` once to rebuild the (gitignored) image cache.
 - Reminder for user: confirm the real deadline with the instructor.
+- Optional polish: example/failure figures have extra vertical whitespace (cosmetic; can be redrawn from the saved per-image CSV without re-running the test).
 
 ## Environment snapshot (2026-10-03)
 - Windows 11, Python 3.11.7, Node 22.19.0, npm 10.9.3, git 2.50.1

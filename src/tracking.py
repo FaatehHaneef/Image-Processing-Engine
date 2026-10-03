@@ -9,6 +9,7 @@ One MLflow experiment per task; each Optuna trial is a nested run under one pare
 Optuna: one SQLite file per study in artifacts/optuna/, so a study can be stopped and resumed
 (load_if_exists=True). The TPE sampler is seeded so the search is repeatable.
 """
+import contextlib
 import functools
 import gc
 
@@ -84,3 +85,32 @@ def study_summary(study: optuna.Study) -> dict:
         out.update(best_value=study.best_value, best_params=study.best_params,
                    best_trial=study.best_trial.number)
     return out
+
+
+@contextlib.contextmanager
+def trial_run(trial: optuna.Trial, params: dict):
+    """Nested MLflow run for one Optuna trial (call inside the study's parent run).
+
+    Pruned / OOM / diverged trials end with MLflow status KILLED and a tag saying why, instead of
+    looking like crashes (FAILED).
+    """
+    run = mlflow.start_run(run_name=f"trial-{trial.number:03d}", nested=True)
+    mlflow.log_params(params)
+    mlflow.set_tag("optuna_trial", trial.number)
+    try:
+        yield run
+    except optuna.TrialPruned as e:
+        mlflow.set_tag("optuna_state", f"PRUNED: {e}")
+        mlflow.end_run(status="KILLED")
+        raise
+    except (torch.cuda.OutOfMemoryError, TrainingDiverged) as e:
+        mlflow.set_tag("optuna_state", f"PRUNED: {type(e).__name__}")
+        mlflow.end_run(status="KILLED")
+        raise
+    except Exception:
+        mlflow.set_tag("optuna_state", "FAIL")
+        mlflow.end_run(status="FAILED")
+        raise
+    else:
+        mlflow.set_tag("optuna_state", "COMPLETE")
+        mlflow.end_run()

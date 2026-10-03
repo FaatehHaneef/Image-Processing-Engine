@@ -1,0 +1,2 @@
+model,file,size_mb,params_M
+task1_universal_ae,task1_universal_ae.onnx,28.55,7.121
