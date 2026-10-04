@@ -70,6 +70,9 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
   - Fresh clone from GitHub + README steps -> healthy, 7/7 models, 36/36 navigation checks.
   - Large model `task4_generator.onnx` is a GitHub Release asset (models-v1); README has the download command; /api/health points to it if missing.
   - `docs/report_material.md` indexes every figure/table per task.
+- **Architecture figure polish (2026-10-04)**
+  - Regenerated `docs/figures/diagram_app.png`, `diagram_task1_autoencoder.png`, `diagram_task3_soft_moe.png`, and `diagram_task4_cgan.png` from `scripts/make_diagrams.py`.
+  - Improved title hierarchy, spacing, annotation placement, formula wrapping, arrow-label contrast, and export padding; verified the source with `py_compile` and visually checked all four renders.
 
 ## In progress
 - Nothing running. The app runs in Docker at http://localhost:8080 (`docker compose down` to stop).
