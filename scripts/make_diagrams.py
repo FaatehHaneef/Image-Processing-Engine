@@ -121,7 +121,8 @@ def task4():
     arrow(ax, 1.65, 6.75, ex[0] - bw / 2, ey[0])
     arrow(ax, 1.65, 5.3, ex[0] - bw / 2, ey[0] - 0.15, rad=0.25)
     ax.text(1.82, 5.92, "broadcast + concat\nstyle map", fontsize=7, color="#b45309", ha="center")
-    ax.text(ex[6], ey[6] - 0.62, "+ style map at bottleneck", ha="center", fontsize=7, color="#b45309")
+    ax.text(ex[6] + 0.35, ey[6] - 0.05, "style map\nat bottleneck", ha="left", va="center",
+            fontsize=6.8, color="#b45309")
     dec = ["512\n2²", "512\n4²", "512\n8²", "256\n16²", "128\n32²", "64\n64²"]
     dx = [ex[6] + (j + 1) * step for j in range(6)]
     dy = [ey[5 - j] for j in range(6)]                      # same level as the mirrored encoder layer
@@ -133,19 +134,19 @@ def task4():
         ax.plot([lx1, lx2], [dy[j] + 0.2, dy[j] + 0.2], color="#9ca3af", lw=0.9, ls="--", zorder=0)
     box(ax, 13.1, 6.1, 1.3, 0.8, "Sketch ŷ\n1×128×128", GREEN, size=8, bold=True)
     arrow(ax, dx[5] + bw / 2, dy[5], 12.7, 6.1)
-    ax.text(7.5, 3.42, "4×4 convs, stride 2  •  BatchNorm  •  LeakyReLU (encoder) / ReLU (decoder)\n"
+    ax.text(7.5, 3.08, "4×4 convs, stride 2  •  BatchNorm  •  LeakyReLU (encoder) / ReLU (decoder)\n"
             "dashed lines = concatenated skip connections  •  dropout in the 3 innermost decoder layers",
             ha="center", fontsize=7.6, color="#4b5563")
     # discriminator (bottom)
-    ax.text(0.2, 2.72, "Discriminator D(x, y, s): 70×70 PatchGAN", fontsize=9.5, weight="bold", color=INK)
-    box(ax, 1.4, 1.35, 2.3, 1.1, "Photo x  +  sketch\n(real y or generated ŷ)\n+ style map", GREY, size=8)
+    ax.text(0.2, 2.48, "Discriminator D(x, y, s): 70×70 PatchGAN", fontsize=9.5, weight="bold", color=INK)
+    box(ax, 1.4, 1.15, 2.3, 1.1, "Photo x  +  sketch\n(real y or generated ŷ)\n+ style map", GREY, size=8)
     layers = ["64\n64²", "128\n32²", "256\n16²", "512\n15²", "1\n14²"]
     lxs = [3.6 + i * 1.6 for i in range(5)]
     for i, (x, t) in enumerate(zip(lxs, layers)):
-        box(ax, x, 1.35, 1.0, 0.85, t, PURPLE if i < 4 else ORANGE, size=8)
-        arrow(ax, (lxs[i - 1] + 0.5) if i else 2.55, 1.35, x - 0.5, 1.35)
-    ax.text(12.4, 1.35, "14×14 grid of\nreal/fake logits\n(one per patch)", fontsize=8.5, color="#374151", va="center")
-    ax.text(7.5, 0.35, "L_D = ½[BCE(D(x,y,s),1) + BCE(D(x,ŷ,s),0)]\n"
+        box(ax, x, 1.15, 1.0, 0.85, t, PURPLE if i < 4 else ORANGE, size=8)
+        arrow(ax, (lxs[i - 1] + 0.5) if i else 2.55, 1.15, x - 0.5, 1.15)
+    ax.text(12.4, 1.15, "14×14 grid of\nreal/fake logits\n(one per patch)", fontsize=8.5, color="#374151", va="center")
+    ax.text(7.5, 0.18, "L_D = ½[BCE(D(x,y,s),1) + BCE(D(x,ŷ,s),0)]\n"
             "L_G = BCE(D(x,ŷ,s),1) + λ_L1·‖y − ŷ‖₁   (λ_L1 = 152.6)",
             ha="center", fontsize=8.8, color=INK)
     save(fig, "diagram_task4_cgan.png")
