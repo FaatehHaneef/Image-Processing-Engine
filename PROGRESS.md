@@ -57,11 +57,19 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
 
 - **Frontend complete (2026-10-04):** all 4 workspaces + landing + System page. Soft-MoE: weight bars, top contributors (from the backend), gate routing diagram, restored/error-map switch. Face-to-Sketch: upload or webcam (permission errors handled), Style 1/2/3 (default 1), "photo is already a cropped face" option, Download sketch. Landing: Stitch illustrations (decorative), one screen without scrolling. 36/36 navigation checks pass. Face-to-Sketch shows the backend's 503 until the Task 4 generator ONNX exists.
 
+- **Phase 5, Task 4 face-to-sketch cGAN (2026-10-04)**
+  - Optuna `task4`: 20 trials = 19 completed, 1 pruned, 0 failed; best #11 (val 0.3022): generator base 64, batch 8, lr_G/lr_D 3.4e-4, dropout 0.33, emb 16, lambda_L1 152.6. `configs/task4.yaml`.
+  - Final: 150 epochs, best val at epoch 55 (score 0.2884, SSIM 0.513).
+  - Test (1,046 pairs, once): L1 0.0986, SSIM 0.498, PSNR 16.4 dB; style 1/2/3 SSIM 0.542/0.411/0.626; style effect 0.11 (style clearly changes the sketch).
+  - ONNX `task4_generator.onnx` 167.9 MB, verified (7.2e-7), LOCAL ONLY (needs a download link before submission).
+  - All 7 models load in the backend (health "ok"); Face-to-Sketch workspace works for real.
+
 ## In progress
-- Phase 5 (Task 4) running automatically: smoke -> Optuna (20 trials, generator base 32/48/64) -> full training (150 epochs) -> test evaluation -> ONNX. ETA ~22:45-23:30 on 2026-10-04.
+- Nothing running on the GPU.
 
 ## Next
-- Frontend (React + Tailwind) from the Stitch screens (in `Stitch Screens/`, not yet committed), Docker Compose, fresh-clone test, README.
+- Phase 7: Docker Compose (backend + frontend), fresh-clone test, README (incl. download link for task4_generator.onnx), report material.
+- `Stitch Screens/` folder still uncommitted (move to docs/stitch/?).
 - Later: v2 upgrade pass for Tasks 1-3 (`--version v2`), after submission of the current versions.
 
 ## Known issues / decisions pending

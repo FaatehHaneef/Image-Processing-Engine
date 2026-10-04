@@ -362,3 +362,13 @@ These were approved by the user. Each one must be stated and justified in the re
 - **Task 2's 63 misrouted inputs:** Task 3 is better on 95% of them; mean SSIM 0.891 (Task 2 hard) -> 0.974 (Task 3), above even Task 2's oracle routing (0.947). Clean photos that hard routing sent to the blur expert now get 94% identity (SSIM 0.999).
 - **Trade-offs to discuss:** lower top-1 gate accuracy (77.5%) is expected and harmless here; PSNR on high occlusion is slightly lower than Task 1 (20.25 vs 20.40 dB) because 27% of the black box is blended back in, while SSIM is higher (0.707 vs 0.686).
 - **ONNX:** whole pipeline (gate + identity + 3 experts + softmax(logits/T) + weighted sum) as one graph, 44.36 MB, outputs `output`, `weights`, `logits`; max diff vs PyTorch 2.3e-5.
+
+## 20. Task 4 results and what they mean (FS2K official test set, run once)
+
+- **Optuna `task4`:** 20 trials x 20 epochs = 19 completed, 1 pruned, 0 failed (0 OOM; even base 64 at batch 16 fit). Best #11 (val score 0.3022): **generator base 64** (the standard pix2pix size, i.e. the largest option), batch 8, lr_G 3.4e-4, lr_D 3.4e-4, dropout 0.33, style embedding 16, lambda_L1 152.6.
+- **Final training:** 150 epochs (~25 min). Best validation score at **epoch 55** (0.2884, SSIM 0.513); by epoch 150 it drifted to 0.309. Typical GAN behaviour: later epochs push towards crisper, more sketch-like strokes, which pixel metrics (L1/SSIM) score slightly worse. The checkpoint is chosen on validation only (epoch 55).
+- **Test (1,046 pairs):** L1 0.0986, SSIM 0.498, PSNR 16.4 dB. Per style: Style 1 SSIM 0.542 (n=619), Style 2 0.411 (n=381, heavy dark shading is hardest), Style 3 0.626 (n=46; small sample).
+- **Style conditioning works:** for the same photo, switching the style changes the sketch by a mean |difference| of 0.11 (11% of the grey range): Style 1 = light thin lines, Style 2 = dark heavy shading, Style 3 = soft grey tones (see `docs/figures/task4_examples.png`).
+- **Confound reminder:** style is tied to photo source in FS2K (style 3 = stock photos in train). Per source: photo1/style 1 SSIM 0.525 vs photo3/style 1 0.583; the single photo1/style-3 test image scores 0.339. Per-style numbers must be read with this in mind.
+- **Why GAN metrics look low:** sketches are mostly white paper with thin lines; L1/SSIM punish strokes that are plausible but a few pixels off. That's why pix2pix-style work also relies on visual inspection (the fixed validation samples logged every 10 epochs in MLflow).
+- **ONNX:** generator only, inputs `photo` [N,3,128,128] + `style` [N] int64, output `sketch` [N,1,128,128]; **167.9 MB** (kept local per the size policy, listed in `models/onnx/.gitignore`; needs a download link); max diff vs PyTorch 7.2e-7.
