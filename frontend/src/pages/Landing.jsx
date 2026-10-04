@@ -1,27 +1,33 @@
-// Landing page (full width, no sidebar). Card images are REAL outputs of our models
-// (made by scripts/make_landing_assets.py); card 3's bars are the real gate weights for that image.
+// Landing page (full width, no sidebar). Decorative only: the card images are the Stitch design
+// illustrations (not model outputs), and card 3's bars are a visual motif with no numbers.
+// Layout: exactly one screen tall (h-screen, no scroll) on landscape laptop screens; the cards
+// share the height left between the top bar and the footer strip, so they scale with the window.
 import { Link } from "react-router-dom";
-import card1 from "../assets/landing/card1_universal.png";
-import card2 from "../assets/landing/card2_hard.png";
-import card3 from "../assets/landing/card3_soft.png";
-import card3Weights from "../assets/landing/card3_soft.json";
-import card4 from "../assets/landing/card4_sketch.png";
+import imgHard from "../assets/landing/design_hard.jpg";
+import imgSketch from "../assets/landing/design_sketch.jpg";
+import imgSoft from "../assets/landing/design_soft.jpg";
+import imgUniversal from "../assets/landing/design_universal.jpg";
 import { TopBar } from "../components/Frame.jsx";
 import { ArrowRightIcon } from "../components/Icons.jsx";
 
-function Card({ n, title, to, img, alt, text, children }) {
+function Card({ n, title, to, img, text, className = "", imgPosition = "center", children }) {
   return (
-    <Link to={to} className="group block rounded-panel border border-line bg-panel p-4 transition-colors hover:border-white/20">
-      <div className="mb-3 flex items-baseline gap-3">
-        <span className="num text-[13px] text-muted">{n}</span>
-        <span className="text-[18px] text-ink">{title}</span>
+    <Link to={to}
+      className={`group flex min-h-0 flex-col rounded-panel border border-line bg-panel p-[1.6vh] transition-colors hover:border-white/20 ${className}`}>
+      <div className="mb-[1.2vh] flex items-baseline gap-3">
+        <span className="num text-[12px] text-muted">{n}</span>
+        <span className="text-[clamp(14px,1.9vh,18px)] text-ink">{title}</span>
       </div>
-      <img src={img} alt={alt} className="aspect-[4/3] w-full rounded-control border border-line object-cover" />
-      <p className="mt-3 text-[14px] leading-snug text-ink-2">{text}</p>
+      <img src={img} alt="" style={{ objectPosition: imgPosition }}
+        className="min-h-0 w-full flex-1 rounded-control border border-line object-cover" />
+      <p className="mt-[1.2vh] text-[clamp(12px,1.55vh,14px)] leading-snug text-ink-2">{text}</p>
       {children}
     </Link>
   );
 }
+
+// Purely decorative bars (no values shown): they only suggest "weights spread over 4 branches".
+const MOTIF = [["Clean", 62], ["Salt", 18], ["Blur", 14], ["Occlusion", 6]];
 
 const STEPS = [
   ["01", "Corrupt", "Noise, blur or occlusion, applied at runtime."],
@@ -32,53 +38,51 @@ const STEPS = [
 
 export default function Landing() {
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex h-screen flex-col overflow-hidden">
       <TopBar links />
-      <main className="bg-grid flex-1">
-        <div className="grid grid-cols-[1fr_auto] items-center gap-16 px-[70px] py-10 max-lg:grid-cols-1 max-lg:px-6">
-          <div>
-            <h1 className="font-serif text-[76px] leading-[1.02] font-light text-ink">Restore.<br />Route.<br />Sketch.</h1>
-            <p className="mt-10 max-w-[560px] text-[16px] text-muted">Four models for repairing damaged photographs and drawing faces.</p>
-            <Link to="/universal"
-              className="mt-10 inline-flex h-14 items-center gap-5 rounded-control bg-accent px-7 text-[17px] text-on-accent transition-colors hover:bg-accent-strong">
-              Enter workspace <ArrowRightIcon width={18} height={18} />
-            </Link>
-          </div>
+      <main className="bg-grid flex min-h-0 flex-1 items-stretch gap-[5vw] px-[70px] py-[3.5vh] max-lg:px-6">
+        {/* hero */}
+        <div className="flex min-w-0 flex-1 flex-col justify-center">
+          <h1 className="font-serif text-[clamp(52px,8.6vh,96px)] leading-[1.02] font-light text-ink">Restore.<br />Route.<br />Sketch.</h1>
+          <p className="mt-[4vh] max-w-[560px] text-[clamp(14px,1.8vh,17px)] text-muted">Four models for repairing damaged photographs and drawing faces.</p>
+          <Link to="/universal"
+            className="mt-[4vh] inline-flex h-[clamp(44px,6vh,56px)] w-fit items-center gap-5 rounded-control bg-accent px-7 text-[clamp(15px,1.9vh,17px)] text-on-accent transition-colors hover:bg-accent-strong">
+            Enter workspace <ArrowRightIcon width={18} height={18} />
+          </Link>
+        </div>
 
-          {/* staggered 2-column card grid (column 2 starts lower, as in the design) */}
-          <div className="grid w-[786px] grid-cols-2 gap-5 max-lg:w-full">
-            <div className="flex flex-col gap-5">
-              <Card n="01" title="Universal Restoration" to="/universal" img={card1}
-                alt="Salt-and-pepper input and the universal autoencoder's output"
-                text="One autoencoder removes noise, blur and occlusion without being told which." />
-              <Card n="03" title="Soft Mixture-of-Experts" to="/soft-moe" img={card3}
-                alt="Occluded input and the soft mixture-of-experts output" text="Continuous blending of specialized sub-networks.">
-                <div className="mt-3 flex flex-col gap-2 rounded-control bg-inset px-3 py-2.5">
-                  {Object.entries(card3Weights.weights).map(([k, v]) => (
-                    <div key={k}>
-                      <div className="flex justify-between"><span className="label">{k}</span><span className="num text-[13px] text-ink-2">{v.toFixed(2)}</span></div>
-                      <div className="mt-1 h-1 rounded-full bg-line"><div className="h-full rounded-full bg-accent" style={{ width: `${v * 100}%` }} /></div>
-                    </div>
-                  ))}
-                  <span className="mt-0.5 text-[12px] text-faint">{card3Weights.caption}</span>
-                </div>
-              </Card>
-            </div>
-            <div className="mt-7 flex flex-col gap-5">
-              <Card n="02" title="Hard-Routed Restoration" to="/hard-routed" img={card2}
-                alt="Blurred input and the hard-routed blur expert's output" text="A classifier routes each image to one specialist autoencoder." />
-              <Card n="04" title="Face-to-Sketch Generator" to="/face-to-sketch" img={card4}
-                alt="Face photograph for the sketch generator" text="A style-conditioned GAN draws a face as a pencil sketch." />
-            </div>
+        {/* 2 x 2 cards, column 2 staggered down a little (as in the design) */}
+        <div className="grid min-h-0 w-[min(860px,56vw)] shrink-0 grid-cols-2 gap-[1.2vw]">
+          <div className="flex min-h-0 flex-col gap-[2vh]">
+            <Card n="01" title="Universal Restoration" to="/universal" img={imgUniversal} className="flex-1"
+              text="Blind degradation removal across mixed artifacts." />
+            <Card n="03" title="Soft Mixture-of-Experts" to="/soft-moe" img={imgSoft} className="flex-[1.15]" imgPosition="center 22%"
+              text="Continuous blending of specialized sub-networks.">
+              <div className="mt-[1.2vh] grid grid-cols-4 gap-x-3 rounded-control bg-inset px-3 py-[1vh]" aria-hidden>
+                {MOTIF.map(([k, w]) => (
+                  <div key={k}>
+                    <span className="label block truncate text-[10px]">{k}</span>
+                    <div className="mt-1 h-1 rounded-full bg-line"><div className="h-full rounded-full bg-accent" style={{ width: `${w}%` }} /></div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+          <div className="flex min-h-0 flex-col gap-[2vh] pt-[3vh]">
+            <Card n="02" title="Hard-Routed Restoration" to="/hard-routed" img={imgHard} className="flex-1"
+              text="Deterministic routing based on a degradation classifier." />
+            <Card n="04" title="Face-to-Sketch Generator" to="/face-to-sketch" img={imgSketch} className="flex-1"
+              text="Structural contour and anatomical graphite synthesis." />
           </div>
         </div>
       </main>
-      <footer className="border-t border-line bg-bar">
-        <div className="grid grid-cols-4 gap-10 px-[70px] py-7 max-lg:grid-cols-2 max-lg:px-6">
+
+      <footer className="shrink-0 border-t border-line bg-bar">
+        <div className="grid grid-cols-4 gap-10 px-[70px] py-[2.2vh] max-lg:px-6">
           {STEPS.map(([n, title, text]) => (
             <div key={n}>
               <div className="flex items-baseline gap-3"><span className="num text-[12px] text-muted">{n}</span><span className="text-[15px] text-ink">{title}</span></div>
-              <p className="mt-2 text-[14px] text-muted">{text}</p>
+              <p className="mt-1 text-[13px] leading-snug text-muted">{text}</p>
             </div>
           ))}
         </div>
