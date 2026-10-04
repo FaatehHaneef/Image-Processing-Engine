@@ -38,10 +38,16 @@ from src.tracking import (create_study, safe_objective, save_study_report, setup
 from src.training import train_restoration  # noqa: E402
 from src.utils import get_device, seed_everything  # noqa: E402
 
-STUDY = "task2_specialists"
 EXPERTS = {"salt": C.SALT, "blur": C.BLUR, "occlusion": C.OCCLUSION}
-SEARCH_SPACE = {"lr": "log-uniform [1e-4, 3e-3]", "batch_size": [16, 32, 64], "bottleneck_dim": [512, 1024, 2048],
-                "base_channels": [24, 32, 40], "alpha": "uniform [0.5, 0.95]", "dropout": "fixed 0.0"}
+# v1 capped base channels at 40 for the old 50 MB file rule; its best trial hit that cap.
+# v2 (upgrade pass, 2026-10-04) removes the cap: no file-size limit on models any more (CLAUDE.md s.7).
+SPACES = {
+    "v1": {"lr": "log-uniform [1e-4, 3e-3]", "batch_size": [16, 32, 64], "bottleneck_dim": [512, 1024, 2048],
+           "base_channels": [24, 32, 40], "alpha": "uniform [0.5, 0.95]", "dropout": "fixed 0.0"},
+    "v2": {"lr": "log-uniform [1e-4, 3e-3]", "batch_size": [16, 32, 64], "bottleneck_dim": [1024, 2048, 4096],
+           "base_channels": [40, 64, 96], "alpha": "uniform [0.5, 0.95]", "dropout": "fixed 0.0"},
+}
+STUDY, SEARCH_SPACE = "task2_specialists", SPACES["v1"]    # set from --version in main()
 
 
 def suggest(trial: optuna.Trial) -> dict:
@@ -80,7 +86,7 @@ def write_config(study: optuna.Study) -> None:
                         "weight_decay": 1e-5, "epochs": 100, "patience": 20},
               "source": f"Optuna study '{STUDY}', best trial #{study.best_trial.number} "
                         f"(mean val score {study.best_value:.4f})"}
-    (C.ROOT / "configs" / "task2_specialists.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
+    (C.ROOT / "configs" / f"{STUDY}.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
 
 
 def main():
@@ -88,7 +94,11 @@ def main():
     ap.add_argument("--n-trials", type=int, default=20)
     ap.add_argument("--epochs", type=int, default=10, help="epochs per specialist per trial")
     ap.add_argument("--smoke", action="store_true", help="2 trials x 1 epoch per expert, in memory, nothing saved")
+    ap.add_argument("--version", choices=list(SPACES), default="v1", help="v2 = upgrade pass (own study/outputs)")
     args = ap.parse_args()
+    global STUDY, SEARCH_SPACE
+    STUDY = "task2_specialists" if args.version == "v1" else f"task2_specialists_{args.version}"
+    SEARCH_SPACE = SPACES[args.version]
     device = get_device()
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     setup_mlflow("task2-hard-routing")
@@ -103,6 +113,11 @@ def main():
         return
 
     study = create_study(STUDY, n_startup_trials=5, n_warmup_steps=3)
+    if args.version != "v1" and not study.trials:
+        # Start v2 by re-running v1's best settings: v2 can then only match or beat v1 (on validation).
+        v1 = optuna.load_study(study_name="task2_specialists",
+                               storage=f"sqlite:///{(C.OPTUNA_DIR / 'task2_specialists.db').as_posix()}")
+        study.enqueue_trial(v1.best_params)
     remaining = args.n_trials - len([t for t in study.trials if t.state.is_finished()])
     print(f"study '{STUDY}': {len(study.trials)} trials so far, running {max(remaining, 0)} more")
     with mlflow.start_run(run_name=f"optuna-{STUDY}"):

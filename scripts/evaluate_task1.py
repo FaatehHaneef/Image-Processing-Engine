@@ -152,8 +152,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true", help="re-run even though test results exist")
     ap.add_argument("--dry-run", action="store_true", help="check the script on 40 VALIDATION images")
-    ap.add_argument("--checkpoint", default=str(CKPT))
+    ap.add_argument("--checkpoint", default=None, help="default: the checkpoint of --version")
+    ap.add_argument("--version", default="v1", help="v2 = evaluate the upgrade-pass model (own output files)")
     args = ap.parse_args()
+    global PREFIX
+    tag = "" if args.version == "v1" else f"_{args.version}"
+    PREFIX = f"task1{tag}"
+    args.checkpoint = args.checkpoint or str(C.CHECKPOINTS / f"task1_universal_ae{tag}.pt")
     results_dir = C.ARTIFACTS / "logs" / "dryrun" if args.dry_run else C.RESULTS
     fig_dir = results_dir if args.dry_run else C.FIGURES
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -179,7 +184,7 @@ def main():
         return
 
     setup_mlflow("task1-universal-ae")
-    with mlflow.start_run(run_name="test-evaluation"):
+    with mlflow.start_run(run_name=f"test-evaluation-{PREFIX}"):
         overall = table[table.condition == "ALL"].iloc[0]
         mlflow.log_metrics({"test_psnr": overall.psnr, "test_ssim": overall.ssim, "test_l1": overall.l1})
         for r in table.itertuples():

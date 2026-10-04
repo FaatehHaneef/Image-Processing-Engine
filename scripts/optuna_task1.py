@@ -36,15 +36,15 @@ from src.tracking import create_study, safe_objective, setup_mlflow, study_summa
 from src.training import train_restoration  # noqa: E402
 from src.utils import get_device, seed_everything  # noqa: E402
 
-STUDY = "task1"
-SEARCH_SPACE = {
-    "lr": "log-uniform [1e-4, 3e-3]",
-    "batch_size": [16, 32, 64],
-    "bottleneck_dim": [256, 512, 1024, 2048],
-    "base_channels": [24, 32, 48, 64],
-    "dropout": "uniform [0.0, 0.3]",
-    "alpha": "uniform [0.5, 0.95]",
+# v1 = the original study. v2 = the upgrade pass (2026-10-04): v1's best trial sat at the top of the
+# size range (base 64, bottleneck 2048), so v2 widens the size choices; no file-size cap (CLAUDE.md s.7).
+SPACES = {
+    "v1": {"lr": "log-uniform [1e-4, 3e-3]", "batch_size": [16, 32, 64], "bottleneck_dim": [256, 512, 1024, 2048],
+           "base_channels": [24, 32, 48, 64], "dropout": "uniform [0.0, 0.3]", "alpha": "uniform [0.5, 0.95]"},
+    "v2": {"lr": "log-uniform [1e-4, 3e-3]", "batch_size": [16, 32, 64], "bottleneck_dim": [1024, 2048, 4096],
+           "base_channels": [48, 64, 96], "dropout": "uniform [0.0, 0.3]", "alpha": "uniform [0.5, 0.95]"},
 }
+STUDY, SEARCH_SPACE = "task1", SPACES["v1"]       # set from --version in main()
 
 
 def suggest(trial: optuna.Trial) -> dict:
@@ -79,8 +79,8 @@ def save_outputs(study: optuna.Study, epochs: int) -> dict:
                "objective": "0.5*val_L1 + 0.5*(1 - val_SSIM), best epoch of each trial",
                "epochs_per_trial": epochs, "search_space": SEARCH_SPACE, **study_summary(study)}
     C.RESULTS.mkdir(parents=True, exist_ok=True)
-    (C.RESULTS / "task1_optuna_summary.json").write_text(json.dumps(summary, indent=2))
-    study.trials_dataframe().to_csv(C.RESULTS / "task1_optuna_trials.csv", index=False)
+    (C.RESULTS / f"{STUDY}_optuna_summary.json").write_text(json.dumps(summary, indent=2))
+    study.trials_dataframe().to_csv(C.RESULTS / f"{STUDY}_optuna_trials.csv", index=False)
 
     C.FIGURES.mkdir(parents=True, exist_ok=True)
     for name, plot in [("history", optuna.visualization.matplotlib.plot_optimization_history),
@@ -89,7 +89,7 @@ def save_outputs(study: optuna.Study, epochs: int) -> dict:
             ax = plot(study)
             ax.figure.set_size_inches(8, 5)
             ax.figure.tight_layout()
-            ax.figure.savefig(C.FIGURES / f"task1_optuna_{name}.png", dpi=120)
+            ax.figure.savefig(C.FIGURES / f"{STUDY}_optuna_{name}.png", dpi=120)
             plt.close("all")
         except Exception as e:  # importance needs >1 completed trial; don't fail the study over a plot
             print(f"could not draw {name} plot: {e}")
@@ -103,7 +103,7 @@ def save_outputs(study: optuna.Study, epochs: int) -> dict:
               "source": f"Optuna study '{STUDY}', best trial #{study.best_trial.number} "
                         f"(val score {study.best_value:.4f})"}
     Path(C.ROOT / "configs").mkdir(exist_ok=True)
-    (C.ROOT / "configs" / "task1.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
+    (C.ROOT / "configs" / f"{STUDY}.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
     return summary
 
 
@@ -113,7 +113,11 @@ def main():
     ap.add_argument("--epochs", type=int, default=15, help="epochs per trial")
     ap.add_argument("--smoke", action="store_true",
                     help="2 trials x 2 epochs, in-memory study, nothing saved (pipeline check only)")
+    ap.add_argument("--version", choices=list(SPACES), default="v1",
+                    help="v2 = upgrade pass with wider size ranges (own study, outputs and config)")
     args = ap.parse_args()
+    global STUDY, SEARCH_SPACE
+    STUDY, SEARCH_SPACE = ("task1" if args.version == "v1" else f"task1_{args.version}"), SPACES[args.version]
 
     device = get_device()
     optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -125,6 +129,9 @@ def main():
         print("smoke OK:", study_summary(study))
         return
     study = create_study(STUDY, n_startup_trials=5, n_warmup_steps=3)
+    if args.version != "v1" and not study.trials:
+        # Start v2 by re-running v1's best settings: v2 can then only match or beat v1 (on validation).
+        study.enqueue_trial(optuna.load_study(study_name="task1", storage=f"sqlite:///{(C.OPTUNA_DIR / 'task1.db').as_posix()}").best_params)
     remaining = args.n_trials - len([t for t in study.trials if t.state.is_finished()])
     print(f"study '{STUDY}': {len(study.trials)} trials so far, running {max(remaining, 0)} more")
 
@@ -138,7 +145,7 @@ def main():
                                                          f"value={t.value} params={t.params}", flush=True)])
             summary = save_outputs(study, args.epochs)
             mlflow.log_metrics({k: summary[k] for k in ("completed", "pruned", "failed")})
-            mlflow.log_artifact(str(C.RESULTS / "task1_optuna_summary.json"))
+            mlflow.log_artifact(str(C.RESULTS / f"{STUDY}_optuna_summary.json"))
     else:
         summary = save_outputs(study, args.epochs)
     print(json.dumps(summary, indent=2))

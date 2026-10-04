@@ -26,7 +26,6 @@ from src.tracking import setup_mlflow  # noqa: E402
 from src.training import load_val_tensors, predict, train_restoration  # noqa: E402
 from src.utils import get_device, seed_everything  # noqa: E402
 
-CKPT = C.CHECKPOINTS / "task1_universal_ae.pt"
 
 
 def make_sample_logger(device, every: int = 10):
@@ -77,20 +76,22 @@ def plot_curves(history: pd.DataFrame, path: Path) -> None:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default=str(C.ROOT / "configs" / "task1.yaml"))
+    ap.add_argument("--version", default="v1", help="v2 = upgrade pass: own config, checkpoint and outputs")
     ap.add_argument("--overwrite", action="store_true", help="replace an existing checkpoint")
     args = ap.parse_args()
-    if CKPT.exists() and not args.overwrite:
-        sys.exit(f"{CKPT} already exists. Use --overwrite to replace it.")
+    tag = "" if args.version == "v1" else f"_{args.version}"
+    ckpt = C.CHECKPOINTS / f"task1_universal_ae{tag}.pt"
+    if ckpt.exists() and not args.overwrite:
+        sys.exit(f"{ckpt} already exists. Use --overwrite to replace it.")
 
-    cfg = yaml.safe_load(Path(args.config).read_text())
+    cfg = yaml.safe_load((C.ROOT / "configs" / f"task1{tag}.yaml").read_text())
     device = get_device()
     seed_everything(C.SEED)
     model = ConvAutoencoder(**cfg["model"]).to(device)
     train_cfg = cfg["train"]
 
     setup_mlflow("task1-universal-ae")
-    with mlflow.start_run(run_name="final-train"):
+    with mlflow.start_run(run_name=f"final-train{tag}"):
         mlflow.log_params({**cfg["model"], **train_cfg, "params_M": count_parameters(model) / 1e6,
                            "config_source": cfg.get("source", "")})
         result = train_restoration(model, train_cfg, train_cfg["epochs"], device,
@@ -101,18 +102,18 @@ def main():
         C.CHECKPOINTS.mkdir(parents=True, exist_ok=True)
         torch.save({"model_config": cfg["model"], "train_config": train_cfg, "state_dict": best["state"],
                     "best_epoch": best["epoch"], "best_val": {k: v for k, v in best.items() if k != "state"},
-                    "history": result["history"]}, CKPT)
+                    "history": result["history"]}, ckpt)
         C.RESULTS.mkdir(parents=True, exist_ok=True)
-        history.to_csv(C.RESULTS / "task1_history.csv", index=False)
-        plot_curves(history, C.FIGURES / "task1_curves.png")
+        history.to_csv(C.RESULTS / f"task1{tag}_history.csv", index=False)
+        plot_curves(history, C.FIGURES / f"task1{tag}_curves.png")
 
         mlflow.log_metrics({"best_epoch": best["epoch"], "best_val_score": best["val_score"],
                             "best_val_ssim": best["val_ssim"], "best_val_psnr": best["val_psnr"]})
-        mlflow.log_artifact(str(CKPT), "checkpoint")
-        mlflow.log_artifact(str(C.FIGURES / "task1_curves.png"))
-        mlflow.log_artifact(str(C.RESULTS / "task1_history.csv"))
+        mlflow.log_artifact(str(ckpt), "checkpoint")
+        mlflow.log_artifact(str(C.FIGURES / f"task1{tag}_curves.png"))
+        mlflow.log_artifact(str(C.RESULTS / f"task1{tag}_history.csv"))
     print(f"best epoch {best['epoch']}: val score {best['val_score']:.4f}, SSIM {best['val_ssim']:.4f}, "
-          f"PSNR {best['val_psnr']:.2f}  -> {CKPT}")
+          f"PSNR {best['val_psnr']:.2f}  -> {ckpt}")
 
 
 if __name__ == "__main__":

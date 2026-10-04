@@ -39,11 +39,22 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
   - Files: `artifacts/results/task2_*` (comparison table .csv/.tex, classifier metrics, misrouting), `docs/figures/task2_{confusion_matrix,examples,misrouted,classifier_curves,specialists_curves,*_optuna_*}.png`.
   - ONNX: classifier 10.61 MB (outputs logits + probs), 3 experts 11.23 MB each; all verified (max diff <= 1.1e-5). Task 3 single file estimate ~44 MB.
 
+- **Phase 4, Task 3 soft mixture-of-experts (2026-10-04)**
+  - Optuna `task3`: 20 trials = 16 completed, 4 pruned, 0 failed; best #17 (val 0.0720): T 2.63, lr 2.7e-4, cls_w 0.010, bal_w 0.0011, l1/ssim 0.59/0.41. `configs/task3.yaml`.
+  - Final: val score 0.0860 (Task 2 init) -> 0.0702; val SSIM 0.859 -> 0.885; gate top-1 acc 99.7% -> 77.5% (blends instead of classifying).
+  - Test: corrupted SSIM 0.806 / 0.808 / 0.845 and PSNR 25.55 / 24.93 / 26.18 dB (Task 1 / Task 2 / Task 3). Low blur 33.1 dB (was 26.3). 63 Task-2 misrouted inputs: SSIM 0.891 -> 0.974, better on 95%.
+  - Routing: identity weight grows as damage gets milder (blur 79/55/46%, occlusion 52/38/27%); salt ~96% salt expert. No inactive experts.
+  - ONNX `task3_soft_moe.onnx` 44.36 MB (one graph), verified max diff 2.3e-5.
+  - Files: `artifacts/results/task3_*`, `docs/figures/task3_*` (routing heatmap, dominant vs distributed, examples, failures, curves).
+- **Prepared in parallel (not yet run/finished):** Task 4 cGAN code; FastAPI backend (6 tests pass, samples, Dockerfile, allow-list .dockerignore); `--version v2` upgrade options for Tasks 1-3 (bigger models, own studies/checkpoints/outputs).
+- **Policy change (2026-10-04):** no model-size cap; ONNX files > 50 MB stay local (auto-listed in `models/onnx/.gitignore`), download link later. CLAUDE.md section 7 updated.
+
 ## In progress
-- Waiting for go-ahead to start Phase 4.
+- Phase 5 (Task 4) running automatically: smoke -> Optuna (20 trials, generator base 32/48/64) -> full training (150 epochs) -> test evaluation -> ONNX. ETA ~22:45-23:30 on 2026-10-04.
 
 ## Next
-- Phase 4: Task 3 soft mixture-of-experts (gate from the Task 2 classifier, experts from the Task 2 specialists, warm-up then joint fine-tune, routing analysis, single ONNX graph ~44 MB).
+- Frontend (React + Tailwind) from the Stitch screens (in `Stitch Screens/`, not yet committed), Docker Compose, fresh-clone test, README.
+- Later: v2 upgrade pass for Tasks 1-3 (`--version v2`), after submission of the current versions.
 
 ## Known issues / decisions pending
 - Global Python 3.11.7 has `torch 2.11.0+cpu`. Always use `.venv`.

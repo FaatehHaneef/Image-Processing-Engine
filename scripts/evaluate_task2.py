@@ -42,9 +42,9 @@ PREFIX = "task2"
 EXPERT_CONDS = {"salt": C.SALT, "blur": C.BLUR, "occlusion": C.OCCLUSION}
 
 
-def load_models(device, ckpt_dir: Path = C.CHECKPOINTS):
-    classifier = load_classifier(ckpt_dir / "task2_classifier.pt").to(device)
-    experts = {cond: load_autoencoder(ckpt_dir / f"task2_expert_{name}.pt").to(device)
+def load_models(device, ckpt_dir: Path = C.CHECKPOINTS, tag: str = ""):
+    classifier = load_classifier(ckpt_dir / "task2_classifier.pt").to(device)    # same classifier in v1 and v2
+    experts = {cond: load_autoencoder(ckpt_dir / f"task2_expert_{name}{tag}.pt").to(device)
                for name, cond in EXPERT_CONDS.items()}
     return classifier, experts
 
@@ -224,14 +224,18 @@ def main():
     ap.add_argument("--checkpoint-dir", default=str(C.CHECKPOINTS))
     ap.add_argument("--figures-only", action="store_true",
                     help="redraw the example figures from the saved per-image results (no re-evaluation)")
+    ap.add_argument("--version", default="v1", help="v2 = evaluate the upgrade-pass models (own output files)")
     args = ap.parse_args()
+    global PREFIX
+    tag = "" if args.version == "v1" else f"_{args.version}"
+    PREFIX = f"task2{tag}"
     out_dir = C.ARTIFACTS / "logs" / "dryrun" if args.dry_run else C.RESULTS
     fig_dir = out_dir if args.dry_run else C.FIGURES
     out_dir.mkdir(parents=True, exist_ok=True)
     per_image = out_dir / f"{PREFIX}_test_per_image.csv"
     if args.figures_only:
         device = get_device()
-        classifier, experts = load_models(device, Path(args.checkpoint_dir))
+        classifier, experts = load_models(device, Path(args.checkpoint_dir), tag)
         df, ds = pd.read_csv(per_image), get_dataset(args.dry_run)
         draw_routed(pick_examples_task2(df), df, classifier, experts, device, ds,
                     "Task 2 (predicted routing): representative test examples", fig_dir / f"{PREFIX}_examples.png")
@@ -241,7 +245,7 @@ def main():
         sys.exit(f"{per_image} exists: the test set was already evaluated. Use --force to re-run.")
 
     device = get_device()
-    classifier, experts = load_models(device, Path(args.checkpoint_dir))
+    classifier, experts = load_models(device, Path(args.checkpoint_dir), tag)
     ds = get_dataset(args.dry_run)
     df = run_test(classifier, experts, device, ds)
     df.to_csv(per_image, index=False)
@@ -279,7 +283,7 @@ def main():
         return
 
     setup_mlflow("task2-hard-routing")
-    with mlflow.start_run(run_name="test-evaluation"):
+    with mlflow.start_run(run_name=f"test-evaluation-{PREFIX}"):
         mlflow.log_metrics({f"test_cls_{k}": cls[k] for k in ("accuracy", "macro_precision", "macro_recall", "macro_f1")})
         mlflow.log_metrics({"test_misrouted_fraction": mis["misrouted_fraction"],
                             "test_oracle_ssim": float(df.oracle_ssim.mean()), "test_pred_ssim": float(df.pred_ssim.mean()),

@@ -108,7 +108,8 @@ Raw data lives in `data/`. **Never write to, modify, move or delete anything und
 - Export every inference model: Task 1 autoencoder, classifier, 3 specialists, full soft-MoE, Task 4 generator.
 - Set `model.eval()` first (dropout/batchnorm). Fixed 128x128 input, dynamic batch axis is fine.
 - Write `scripts/verify_onnx.py` that compares ONNX Runtime vs PyTorch outputs numerically (max abs diff, mean abs diff) on real samples. Save the results for the report.
-- ONNX files go in `models/onnx/` and are committed directly to git (no LFS). Report file sizes after export. If any file is over 50 MB, tell me and we'll use a GitHub Release with a download script instead.
+- ONNX files go in `models/onnx/`. Report file sizes after export. **Model size is NOT limited by the 50 MB GitHub threshold** (decided 2026-10-04): model quality comes first. Files up to 50 MB are committed directly to git (no LFS); files over 50 MB stay local only (auto-listed in `models/onnx/.gitignore` by the export script) and get a download link later.
+- Priorities: never limit a high-priority goal (model quality, required features) to satisfy a lower-priority convenience (file size, repo tidiness). If a trade-off appears, flag it to me with options before deciding.
 
 ## 8. Application
 

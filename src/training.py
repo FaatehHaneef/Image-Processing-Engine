@@ -211,3 +211,123 @@ def train_classifier(model, cfg: dict, epochs: int, device, *, trial=None, patie
             print(f"early stopping at epoch {epoch} (best epoch {best['epoch']})")
             break
     return {"history": history, "best": best}
+
+
+# ------------------------------------------------------------------ soft mixture-of-experts (Task 3)
+
+def balance_loss(w: torch.Tensor) -> torch.Tensor:
+    """sum_k (mean_w_k - 1/4)^2 over the batch (the PDF's suggestion). On a balanced batch the ideal
+    average weight per branch is exactly 1/4, so this is 0 when no branch is over- or under-used."""
+    return ((w.mean(dim=0) - 1.0 / w.shape[1]) ** 2).sum()
+
+
+def moe_loss(x_hat, y, w, logits, temperature, cfg: dict, labels) -> dict:
+    """L = l1_w*L1 + ssim_w*(1-SSIM) + cls_w*CE + bal_w*balance  (all in float32).
+    CE uses logits / T, i.e. the same distribution as the routing weights, so it keeps the actual
+    routing related to the known corruption label."""
+    from src.losses import ssim
+    x_hat, y = x_hat.float(), y.float()
+    parts = {"l1": torch.nn.functional.l1_loss(x_hat, y), "ssim_loss": 1 - ssim(x_hat, y),
+             "ce": torch.nn.functional.cross_entropy(logits.float() / temperature, labels),
+             "balance": balance_loss(w.float())}
+    parts["total"] = (cfg["l1_w"] * parts["l1"] + cfg["ssim_w"] * parts["ssim_loss"]
+                      + cfg["cls_w"] * parts["ce"] + cfg["bal_w"] * parts["balance"])
+    return parts
+
+
+@torch.no_grad()
+def validate_moe(model, val, device) -> dict:
+    """Restoration metrics + routing statistics on the balanced validation manifest."""
+    x, y, labels = val
+    model.eval()
+    outs, ws = [], []
+    for i in range(0, len(x), 64):
+        with torch.autocast("cuda", dtype=torch.float16):
+            o, w, _ = model(x[i:i + 64].to(device))
+        outs.append(o.float().cpu())
+        ws.append(w.float().cpu())
+    out, w = torch.cat(outs), torch.cat(ws)
+    m = per_image_metrics(out, y)
+    row = {"val_l1": m["l1"].mean().item(), "val_ssim": m["ssim"].mean().item(), "val_psnr": m["psnr"].mean().item(),
+           "gate_acc": (w.argmax(1) == labels).float().mean().item()}
+    row["val_score"] = objective_score(row["val_l1"], row["val_ssim"])
+    mean_w = w.mean(0)                     # balanced val set -> ideal 0.25 each
+    for k, name in enumerate(C.CONDITIONS):
+        row[f"mean_w_{name}"] = mean_w[k].item()
+        row[f"own_w_{name}"] = w[labels == k, k].mean().item()   # weight on the correct branch
+    row["min_branch_w"], row["max_branch_w"] = mean_w.min().item(), mean_w.max().item()
+    return row
+
+
+def routing_collapsed(row: dict, low: float = 0.05, high: float = 0.5) -> bool:
+    """Collapse = on a BALANCED set, some branch is (almost) never used or one branch takes over."""
+    return row["min_branch_w"] < low or row["max_branch_w"] > high
+
+
+def train_moe(model, cfg: dict, device, *, trial=None, patience: int | None = None, num_workers: int = 2) -> dict:
+    """Two stages (PDF): 1) warm-up: experts frozen, only the gate trains (lr = warmup_lr);
+    2) joint fine-tuning: everything trains with the smaller lr = cfg['lr'].
+    cfg: warmup_epochs, joint_epochs, warmup_lr, lr, batch_size, l1_w, ssim_w, cls_w, bal_w.
+    Epoch 0 = the untouched Task 2 initialization (logged as a baseline)."""
+    loader = make_balanced_loader(cfg["batch_size"], num_workers=num_workers)
+    val = load_val_tensors()
+    T = model.temperature.item()
+    history, best, since_best = [], {"val_score": math.inf}, 0
+
+    row0 = {"epoch": 0, "stage": "init", **validate_moe(model, val, device)}
+    history.append(row0)
+    mlflow.log_metrics({k: v for k, v in row0.items() if k not in ("epoch", "stage")}, step=0)
+    print(f"init (Task 2 weights): val_score {row0['val_score']:.4f} ssim {row0['val_ssim']:.4f} "
+          f"gate_acc {row0['gate_acc']:.4f}", flush=True)
+
+    total = cfg["warmup_epochs"] + cfg["joint_epochs"]
+    for epoch in range(1, total + 1):
+        if epoch == 1:                                   # stage 1: gate only
+            stage = "warmup"
+            model.freeze_experts(True)
+            opt = torch.optim.AdamW(model.gate.parameters(), lr=cfg["warmup_lr"], weight_decay=1e-5)
+        if epoch == cfg["warmup_epochs"] + 1:            # stage 2: everything, smaller lr
+            stage = "joint"
+            model.freeze_experts(False)
+            opt = torch.optim.AdamW(model.parameters(), lr=cfg["lr"], weight_decay=1e-5)
+        scaler = torch.amp.GradScaler() if epoch in (1, cfg["warmup_epochs"] + 1) else scaler
+        t0 = time.perf_counter()
+        loader.batch_sampler.set_epoch(epoch)
+        model.train()
+        sums = {}
+        for x, y, labels in loader:
+            x, y, labels = x.to(device, non_blocking=True), y.to(device, non_blocking=True), labels.to(device)
+            with torch.autocast("cuda", dtype=torch.float16):
+                x_hat, w, logits = model(x)
+            parts = moe_loss(x_hat, y, w, logits, T, cfg, labels)
+            if not torch.isfinite(parts["total"]):
+                raise TrainingDiverged(f"non-finite loss at epoch {epoch}")
+            opt.zero_grad(set_to_none=True)
+            scaler.scale(parts["total"]).backward()
+            scaler.step(opt)
+            scaler.update()
+            for k, v in parts.items():
+                sums[k] = sums.get(k, 0.0) + v.item()
+        row = {"epoch": epoch, "stage": stage, **{f"train_{k}": v / len(loader) for k, v in sums.items()},
+               **validate_moe(model, val, device), "epoch_s": time.perf_counter() - t0}
+        history.append(row)
+        mlflow.log_metrics({k: v for k, v in row.items() if k not in ("epoch", "stage")}, step=epoch)
+        print(f"epoch {epoch:2d} [{stage}] loss {row['train_total']:.4f} val_score {row['val_score']:.4f} "
+              f"ssim {row['val_ssim']:.4f} psnr {row['val_psnr']:.2f} gate_acc {row['gate_acc']:.4f} "
+              f"branch_w min/max {row['min_branch_w']:.3f}/{row['max_branch_w']:.3f} ({row['epoch_s']:.1f}s)", flush=True)
+
+        if row["val_score"] < best["val_score"]:
+            best, since_best = {**row, "state": copy.deepcopy(model.state_dict())}, 0
+        else:
+            since_best += 1
+        if trial is not None:
+            if routing_collapsed(row):
+                raise optuna.TrialPruned(f"routing collapse at epoch {epoch} "
+                                         f"(branch weights min {row['min_branch_w']:.3f}, max {row['max_branch_w']:.3f})")
+            trial.report(row["val_score"], epoch)
+            if trial.should_prune():
+                raise optuna.TrialPruned(f"pruned at epoch {epoch}")
+        if patience is not None and stage == "joint" and since_best >= patience:
+            print(f"early stopping at epoch {epoch} (best epoch {best['epoch']})")
+            break
+    return {"history": history, "best": best, "init": row0}
