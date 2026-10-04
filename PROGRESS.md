@@ -31,11 +31,19 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
   - Figures: `docs/figures/task1_{curves,examples,failures,optuna_history,optuna_importance}.png`.
   - ONNX `models/onnx/task1_universal_ae.onnx` 28.55 MB; vs PyTorch max diff 4.05e-6, mean 5.7e-8 (PASS).
 
+- **Phase 3, Task 2 classifier + hard-routed specialists (2026-10-04)**
+  - Classifier Optuna `task2_classifier`: 25 trials = 7 completed, 18 pruned, 0 failed (~20 min); best #23 (val CE 0.0135). Final: val acc 99.73%. `configs/task2_classifier.yaml`.
+  - Specialist Optuna `task2_specialists` (shared search, each trial trains all 3): 20 trials = 10 completed, 10 pruned, 0 failed (~48 min); best #17 (mean val score 0.1735): base 40, bottleneck 2048, lr 2.1e-3, batch 16, alpha 0.53. `configs/task2_specialists.yaml`.
+  - Final specialists (100 epochs each, ~15 min each): val SSIM salt 0.844, blur 0.848, occlusion 0.739.
+  - Test (once): classifier acc 99.83%, macro-F1 0.997; 63/36,690 misrouted (41 clean->blur, 3 clean->occlusion, 19 low occlusion->clean). Oracle vs predicted overall SSIM 0.8269 vs 0.8268. vs Task 1: overall SSIM 0.810 -> 0.827 (identity on clean); per-corruption SSIM equal, PSNR 0.3-0.8 dB lower (smaller experts).
+  - Files: `artifacts/results/task2_*` (comparison table .csv/.tex, classifier metrics, misrouting), `docs/figures/task2_{confusion_matrix,examples,misrouted,classifier_curves,specialists_curves,*_optuna_*}.png`.
+  - ONNX: classifier 10.61 MB (outputs logits + probs), 3 experts 11.23 MB each; all verified (max diff <= 1.1e-5). Task 3 single file estimate ~44 MB.
+
 ## In progress
-- Waiting for go-ahead to start Phase 3.
+- Waiting for go-ahead to start Phase 4.
 
 ## Next
-- Phase 3: Task 2 classifier + 3 specialists (hard routing). NOTE: Task 3 exports 3 specialists in ONE ONNX file -> keep the specialist search space small enough (base channels <= 32/48) so that file stays under 50 MB.
+- Phase 4: Task 3 soft mixture-of-experts (gate from the Task 2 classifier, experts from the Task 2 specialists, warm-up then joint fine-tune, routing analysis, single ONNX graph ~44 MB).
 
 ## Known issues / decisions pending
 - Global Python 3.11.7 has `torch 2.11.0+cpu`. Always use `.venv`.

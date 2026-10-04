@@ -114,3 +114,33 @@ def trial_run(trial: optuna.Trial, params: dict):
     else:
         mlflow.set_tag("optuna_state", "COMPLETE")
         mlflow.end_run()
+
+
+def save_study_report(study: optuna.Study, prefix: str, extra: dict) -> dict:
+    """Write the study summary (JSON), all trials (CSV) and two plots for the report.
+
+    -> artifacts/results/<prefix>_optuna_summary.json, <prefix>_optuna_trials.csv
+    -> docs/figures/<prefix>_optuna_history.png, <prefix>_optuna_importance.png
+    """
+    import json
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    summary = {**extra, **study_summary(study)}
+    C.RESULTS.mkdir(parents=True, exist_ok=True)
+    (C.RESULTS / f"{prefix}_optuna_summary.json").write_text(json.dumps(summary, indent=2))
+    study.trials_dataframe().to_csv(C.RESULTS / f"{prefix}_optuna_trials.csv", index=False)
+    C.FIGURES.mkdir(parents=True, exist_ok=True)
+    for name, plot in [("history", optuna.visualization.matplotlib.plot_optimization_history),
+                       ("importance", optuna.visualization.matplotlib.plot_param_importances)]:
+        try:
+            ax = plot(study)
+            ax.figure.set_size_inches(8, 5)
+            ax.figure.tight_layout()
+            ax.figure.savefig(C.FIGURES / f"{prefix}_optuna_{name}.png", dpi=120)
+        except Exception as e:  # e.g. importance needs >1 completed trial; never fail a study over a plot
+            print(f"could not draw {name} plot: {e}")
+        plt.close("all")
+    return summary

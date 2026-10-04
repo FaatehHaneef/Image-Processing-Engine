@@ -34,14 +34,16 @@ def verify(name: str, x: torch.Tensor) -> dict:
     model = entry["load"](entry["checkpoint"])
     session = ort.InferenceSession(str(C.ONNX_DIR / f"{name}.onnx"), providers=["CPUExecutionProvider"])
     with torch.no_grad():
-        ref = model(x).numpy()
-    got = session.run(None, {entry["inputs"][0]: x.numpy()})[0]
-    single = session.run(None, {entry["inputs"][0]: x[:1].numpy()})[0]
-    diff = np.abs(got - ref)
-    row = {"model": name, "n_images": len(x), "max_abs_diff": float(diff.max()),
-           "mean_abs_diff": float(diff.mean()),
-           "batch1_max_abs_diff": float(np.abs(single - ref[:1]).max()),
-           "passed": bool(diff.max() < TOLERANCE)}
+        ref = model(x)
+    refs = [r.numpy() for r in (ref if isinstance(ref, (tuple, list)) else (ref,))]  # models may return several outputs
+    got = session.run(None, {entry["inputs"][0]: x.numpy()})
+    single = session.run(None, {entry["inputs"][0]: x[:1].numpy()})
+    diffs = [np.abs(g - r) for g, r in zip(got, refs)]
+    max_diff = max(float(d.max()) for d in diffs)
+    row = {"model": name, "n_images": len(x), "outputs": "+".join(entry["outputs"]), "max_abs_diff": max_diff,
+           "mean_abs_diff": float(np.mean([d.mean() for d in diffs])),
+           "batch1_max_abs_diff": max(float(np.abs(s - r[:1]).max()) for s, r in zip(single, refs)),
+           "passed": bool(max_diff < TOLERANCE)}
     print(f"{name}: max {row['max_abs_diff']:.2e}, mean {row['mean_abs_diff']:.2e}, "
           f"batch-1 max {row['batch1_max_abs_diff']:.2e} -> {'PASS' if row['passed'] else 'FAIL'}")
     return row
