@@ -55,6 +55,11 @@ export const api = {
     MOCK ? mock.universal(opts) : request("/restore/universal", { method: "POST", body: form(source, restoreFields(opts)) }),
   restoreHard: (source, opts) =>
     MOCK ? mock.hard(opts) : request("/restore/hard", { method: "POST", body: form(source, restoreFields(opts)) }),
+  restoreSoft: (source, opts) =>
+    MOCK ? mock.soft(opts) : request("/restore/soft", { method: "POST", body: form(source, restoreFields(opts)) }),
+  /** style: 1 | 2 | 3; fit: "crop" (centre square crop) | "stretch" (photo is already a cropped face). */
+  sketch: (source, { style, fit }) =>
+    MOCK ? mock.sketch(style) : request("/sketch", { method: "POST", body: form(source, { style, fit }) }),
 };
 
 // ------------------------------------------------------------------ mock mode (placeholders only)
@@ -86,7 +91,8 @@ const mock = {
     return { status: "ok", models_loaded: 0, models_expected: 7, lfs_pointer_files: [], models: {}, mock: true };
   },
   async samples() {
-    return { pets: Array.from({ length: 4 }, (_, i) => ({ name: `mock/${i}.png`, url: placeholder(`sample ${i + 1}`) })), faces: [] };
+    const list = (kind) => Array.from({ length: 4 }, (_, i) => ({ name: `${kind}/mock_${i}.png`, url: placeholder(`sample ${i + 1}`) }));
+    return { pets: list("pets"), faces: list("faces") };
   },
   async corrupt(o) {
     await wait(300);
@@ -103,5 +109,18 @@ const mock = {
       probabilities: { clean: 0.25, salt: 0.25, blur: 0.25, occlusion: 0.25 }, predicted_class: "clean", selected_expert: "identity",
       input_image: placeholder("input"), output_image: placeholder("output"), ...mockRef(o), timing_ms: { classifier: 0, expert: 0, inference: 0, total: 0 },
     };
+  },
+  async soft(o) {
+    await wait(900);
+    const weights = { identity: 0.25, "salt expert": 0.25, "blur expert": 0.25, "occlusion expert": 0.25 };
+    return {
+      task: "Soft Mixture-of-Experts Restoration", corruption: mockCorruption(o), weights,
+      ranking: Object.keys(weights), dominant_branch: "identity", top_contributors: Object.keys(weights), top_contributor_threshold: 0.1,
+      input_image: placeholder("input"), output_image: placeholder("output"), ...mockRef(o), timing_ms: { inference: 0, total: 0 },
+    };
+  },
+  async sketch(style) {
+    await wait(900);
+    return { task: "Face-to-Sketch Generator", style, photo_image: placeholder("photo"), sketch_image: placeholder(`sketch style ${style}`), timing_ms: { inference: 0, total: 0 } };
   },
 };

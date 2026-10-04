@@ -34,6 +34,7 @@ from .models import store
 
 BRANCHES = ["identity", "salt expert", "blur expert", "occlusion expert"]   # gate / classifier order
 EXPERT_MODELS = {1: "task2_expert_salt", 2: "task2_expert_blur", 3: "task2_expert_occlusion"}
+TOP_CONTRIBUTOR_MIN = 0.10   # soft-MoE: a branch "contributes" if its weight is at least 10%
 
 
 @asynccontextmanager
@@ -160,8 +161,12 @@ async def restore_soft(file: UploadFile | None = File(None), sample: str | None 
     t0, arr, info, clean = await prepare(file, sample, corruption, level, seed, input_is_clean)
     (out, weights, _), t_inf = store.run("task3_soft_moe", {"input": to_batch(arr)})
     w = {b: round(float(v), 4) for b, v in zip(BRANCHES, weights[0])}
+    ranking = sorted(w, key=w.get, reverse=True)
+    # "Top contributors" = branches with at least 10% of the mixture (always at least the largest one).
+    top = [b for b in ranking if w[b] >= TOP_CONTRIBUTOR_MIN] or ranking[:1]
     return {"task": "Soft Mixture-of-Experts Restoration", "corruption": info, "weights": w,
-            "ranking": sorted(w, key=w.get, reverse=True), "dominant_branch": max(w, key=w.get),
+            "ranking": ranking, "dominant_branch": ranking[0], "top_contributors": top,
+            "top_contributor_threshold": TOP_CONTRIBUTOR_MIN,
             "input_image": to_png_data_url(arr), "output_image": to_png_data_url(out[0]),
             **reference_fields(out[0], clean), "timing_ms": {"inference": round(t_inf, 1), "total": ms(t0)}}
 

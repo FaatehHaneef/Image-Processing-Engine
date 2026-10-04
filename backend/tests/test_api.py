@@ -100,3 +100,11 @@ def test_error_map_only_with_a_real_clean_reference(client):
     assert clean_in["reference_available"]
     already = client.post("/api/restore/universal", files={"file": ("x.png", png_bytes(), "image/png")}).json()
     assert not already["reference_available"] and already["error_map_image"] is None   # never faked
+
+
+@needs("task3_soft_moe")
+def test_soft_weights_and_top_contributors(client):
+    j = client.post("/api/restore/soft", data={"sample": "pets/beagle_54.jpg", "corruption": "blur", "level": "medium"}).json()
+    w = j["weights"]
+    assert abs(sum(w.values()) - 1) < 1e-3 and j["ranking"][0] == j["dominant_branch"]
+    assert j["top_contributors"] and all(w[b] >= 0.1 for b in j["top_contributors"][1:])

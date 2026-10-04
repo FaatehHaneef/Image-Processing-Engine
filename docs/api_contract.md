@@ -107,12 +107,14 @@ Form: as universal.
  "weights": {"identity": 0.55, "salt expert": 0.0, "blur expert": 0.44, "occlusion expert": 0.01},  // sum to 1
  "ranking": ["identity", "blur expert", "occlusion expert", "salt expert"],   // by weight, largest first
  "dominant_branch": "identity",
+ "top_contributors": ["identity", "blur expert"],   // branches with weight >= top_contributor_threshold (at least 1)
+ "top_contributor_threshold": 0.1,
  "input_image": "...", "output_image": "...", <reference fields>,
  "timing_ms": {"inference": 95.0, "total": 120.3}}
 ```
 
 ### `POST /api/sketch` (Task 4, Face-to-Sketch Generator)
-Form: `file` | `sample`, `style` (1, 2 or 3), `fit` (`crop` = centre square crop, default; `stretch` = direct resize as in training).
+Form: `file` | `sample`, `style` (1, 2 or 3; UI default 1), `fit` (`crop` = centre square crop, default; `stretch` = direct resize as in training, for photos that are already a cropped face). A webcam capture is sent as an uploaded PNG `file`.
 ```json
 {"task": "Face-to-Sketch Generator", "style": 2,
  "photo_image": "data:...",      // the 128x128 photo the generator saw

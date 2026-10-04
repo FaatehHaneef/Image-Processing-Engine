@@ -55,8 +55,9 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
   - `docs/api_contract.md` = the backend API. New backend bits: `POST /api/corrupt`, error map only when a clean reference exists (`input_is_clean`), 16 pet samples. Mock mode `VITE_MOCK=1` (off by default, MOCK DATA badge).
   - Run: backend `.venv\Scripts\python -m uvicorn backend.app.main:app --port 8000`; frontend `cd frontend; npm install; npm run dev` -> http://localhost:5173.
 
+- **Frontend complete (2026-10-04):** all 4 workspaces + landing + System page. Soft-MoE: weight bars, top contributors (from the backend), gate routing diagram, restored/error-map switch. Face-to-Sketch: upload or webcam (permission errors handled), Style 1/2/3 (default 1), "photo is already a cropped face" option, Download sketch. Landing: Stitch illustrations (decorative), one screen without scrolling. 36/36 navigation checks pass. Face-to-Sketch shows the backend's 503 until the Task 4 generator ONNX exists.
+
 ## In progress
-- Waiting for the Stitch screens of Soft Mixture-of-Experts and Face-to-Sketch Generator (3 each) before building those workspaces.
 - Phase 5 (Task 4) running automatically: smoke -> Optuna (20 trials, generator base 32/48/64) -> full training (150 epochs) -> test evaluation -> ONNX. ETA ~22:45-23:30 on 2026-10-04.
 
 ## Next

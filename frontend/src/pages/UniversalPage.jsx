@@ -27,8 +27,8 @@ export default function UniversalPage() {
       <ErrorBanner message={s.error} onClose={() => s.setError(null)} />
 
       <div className="grid grid-cols-2 gap-6">
-        <UploadPanel source={s.source} onSource={s.setSource} alreadyCorrupted={s.alreadyCorrupted}
-          onAlreadyCorrupted={s.setAlreadyCorrupted} disabled={s.busy} onError={s.setError} />
+        <UploadPanel source={s.source} onSource={s.setSource} disabled={s.busy} onError={s.setError}
+          toggle={{ label: "Image is already corrupted", checked: s.alreadyCorrupted, onChange: s.setAlreadyCorrupted }} />
         <CorruptionPanel corruption={s.corruption} level={s.level} onCorruption={s.setCorruption} onLevel={s.setLevel}
           locked={s.alreadyCorrupted} disabled={s.busy}>
           <Button onClick={s.applyCorruption} disabled={!s.canApply}>{s.phase === "applying" ? "Applying…" : "Apply corruption"}</Button>

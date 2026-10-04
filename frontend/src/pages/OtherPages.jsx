@@ -1,26 +1,15 @@
-// Placeholder workspaces (design in progress) and the minimal System page.
-import { PageHeader, WorkspaceLayout } from "../components/Frame.jsx";
+// The minimal System page (backend health check).
+import { WorkspaceLayout } from "../components/Frame.jsx";
 import { useHealth } from "../lib/useHealth.js";
-
-export function DesignInProgress({ number, title }) {
-  return (
-    <WorkspaceLayout>
-      <PageHeader number={number} title={title} description="This workspace's design is in progress." />
-      <div className="flex h-64 items-center justify-center rounded-panel border border-dashed border-line">
-        <span className="label">Design in progress</span>
-      </div>
-    </WorkspaceLayout>
-  );
-}
 
 export function SystemPage() {
   const { loading, data, error } = useHealth();
   return (
     <WorkspaceLayout>
-      <div className="mb-8">
-        <div className="label mb-3">System</div>
-        <h1 className="font-serif text-[46px] leading-[1.05] font-light text-ink">Model status</h1>
-        <p className="mt-3 text-[15px] text-muted">Live result of the backend health check (GET /api/health).</p>
+      <div className="mb-7">
+        <div className="label mb-2.5">System</div>
+        <h1 className="font-serif text-[44px] leading-[1.05] font-light text-ink">Model status</h1>
+        <p className="mt-2.5 text-[15px] text-muted">Live result of the backend health check (GET /api/health).</p>
       </div>
       {loading && <p className="label">Checking…</p>}
       {error && <p className="text-[14px] text-danger">{error}</p>}

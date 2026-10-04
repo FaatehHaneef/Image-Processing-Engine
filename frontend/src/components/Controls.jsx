@@ -68,10 +68,13 @@ function SamplePicker({ kind, onPick, onClose }) {
 }
 
 /**
- * Source panel: drop zone / browse, "Choose a sample", Clear, and the "already corrupted" toggle.
+ * Source panel: drop zone / browse, "Choose a sample", Clear, and an optional toggle.
  * source = { file?, sample?, name, preview } or null.
+ * toggle = { label, checked, onChange } or null (e.g. "Image is already corrupted").
+ * tabs   = optional element shown above the drop zone (Face-to-Sketch: Upload | Webcam).
+ * children = optional element that REPLACES the drop zone (Face-to-Sketch: the webcam view).
  */
-export function UploadPanel({ source, onSource, alreadyCorrupted, onAlreadyCorrupted, disabled, sampleKind = "pets", onError }) {
+export function UploadPanel({ source, onSource, toggle, tabs, children, disabled, sampleKind = "pets", onError }) {
   const inputRef = useRef(null);
   const [drag, setDrag] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -86,6 +89,8 @@ export function UploadPanel({ source, onSource, alreadyCorrupted, onAlreadyCorru
   return (
     <Panel title="Source" className="relative">
       <div className="flex h-full flex-col gap-3">
+        {tabs}
+        {children ?? (
         <div
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
@@ -121,7 +126,8 @@ export function UploadPanel({ source, onSource, alreadyCorrupted, onAlreadyCorru
           <input ref={inputRef} type="file" accept="image/jpeg,image/png" className="hidden"
             onChange={(e) => { takeFile(e.target.files[0]); e.target.value = ""; }} />
         </div>
-        <Toggle label="Image is already corrupted" checked={alreadyCorrupted} onChange={onAlreadyCorrupted} disabled={disabled} />
+        )}
+        {toggle && <Toggle label={toggle.label} checked={toggle.checked} onChange={toggle.onChange} disabled={disabled} />}
       </div>
       {picking && (
         <SamplePicker kind={sampleKind} onClose={() => setPicking(false)}
@@ -223,7 +229,7 @@ export function ProgressStatus({ label, startedAt }) {
 }
 
 /** Bottom strip with the run's real settings + Download result. items = [[label, value], ...]. */
-export function ResultStrip({ items, downloadUrl, downloadName = "restored.png" }) {
+export function ResultStrip({ items, downloadUrl, downloadName = "restored.png", downloadLabel = "Download result" }) {
   return (
     <div className="mt-6 flex flex-wrap items-center gap-x-10 gap-y-3 rounded-panel border border-line bg-panel px-6 py-4">
       {items.map(([k, v]) => (
@@ -234,7 +240,7 @@ export function ResultStrip({ items, downloadUrl, downloadName = "restored.png" 
       ))}
       {downloadUrl && (
         <a href={downloadUrl} download={downloadName} className="ml-auto">
-          <Button variant="secondary" tabIndex={-1}><DownloadIcon /> Download result</Button>
+          <Button variant="secondary" tabIndex={-1}><DownloadIcon /> {downloadLabel}</Button>
         </a>
       )}
     </div>
@@ -268,5 +274,35 @@ export function RoutingBars({ values, highlight }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * Gate -> 4 branches diagram. Each curve's thickness and brightness are proportional to that branch's
+ * weight from the backend response; the dominant branch is highlighted. weights = [[name, w], ...] in a fixed order.
+ */
+export function RoutingDiagram({ weights, dominant }) {
+  const W = 1000, H = 230, gateX = 230, nodeX = 560, nodeW = 200;
+  const ys = weights.map((_, i) => 30 + i * ((H - 60) / (weights.length - 1)));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-[230px] w-full" role="img" aria-label="Gate routing weights">
+      {weights.map(([name, w], i) => (
+        <path key={name} d={`M ${gateX + 90} ${H / 2} C ${gateX + 230} ${H / 2}, ${nodeX - 140} ${ys[i]}, ${nodeX} ${ys[i]}`}
+          fill="none" stroke="var(--color-accent)" strokeWidth={1 + 9 * w} strokeOpacity={0.18 + 0.82 * w} strokeLinecap="round" />
+      ))}
+      <rect x={gateX - 90} y={H / 2 - 22} width={180} height={44} rx={8} fill="var(--color-inset)" stroke="var(--color-line)" />
+      <text x={gateX} y={H / 2 + 5} textAnchor="middle" fill="var(--color-ink)" fontSize="15" fontFamily="var(--font-sans)">Gate</text>
+      {weights.map(([name, w], i) => {
+        const top = name === dominant;
+        return (
+          <g key={name}>
+            <rect x={nodeX} y={ys[i] - 17} width={nodeW} height={34} rx={8}
+              fill={top ? "rgba(159,184,207,0.16)" : "var(--color-inset)"} stroke={top ? "var(--color-accent)" : "var(--color-line)"} />
+            <text x={nodeX + 14} y={ys[i] + 5} fill={top ? "var(--color-ink)" : "var(--color-muted)"} fontSize="14" fontFamily="var(--font-sans)">{name}</text>
+            <text x={nodeX + nodeW + 16} y={ys[i] + 5} fill="var(--color-ink-2)" fontSize="13" fontFamily="var(--font-mono)">{(w * 100).toFixed(1)}%</text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }

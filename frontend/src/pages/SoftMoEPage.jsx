@@ -1,20 +1,22 @@
-// Workspace 02: Hard-Routed Restoration (Task 2). Classifier -> exactly one specialist (or identity).
+// Workspace 03: Soft Mixture-of-Experts Restoration (Task 3). A gate blends all four branches.
+// Every number shown (weights, top contributors, time) comes from the backend response.
 import { useState } from "react";
-import { Button, CorruptionPanel, ErrorBanner, ErrorLegend, ImagePanel, ProgressStatus, ResultStrip, RoutingBars, UploadPanel } from "../components/Controls.jsx";
+import { Button, CorruptionPanel, ErrorBanner, ErrorLegend, ImagePanel, ProgressStatus, ResultStrip, RoutingBars, RoutingDiagram, UploadPanel } from "../components/Controls.jsx";
 import { PageHeader, WorkspaceLayout } from "../components/Frame.jsx";
 import { FrameIcon, WandIcon } from "../components/Icons.jsx";
 import { api } from "../lib/api.js";
 import { useRestoration } from "../lib/useRestoration.js";
 import { settingsItems } from "./UniversalPage.jsx";
 
-const CLASS_NAMES = { clean: "Clean", salt: "Salt-and-pepper", blur: "Gaussian blur", occlusion: "Rectangular occlusion" };
-const EXPERT_NAMES = { identity: "Identity (bypass)", "salt expert": "Salt-and-pepper expert", "blur expert": "Blur expert", "occlusion expert": "Occlusion expert" };
+// backend branch key -> display name (fixed gate order: identity, salt, blur, occlusion)
+const BRANCH_NAMES = { identity: "Identity", "salt expert": "Salt-and-pepper", "blur expert": "Blur", "occlusion expert": "Occlusion" };
 
-export default function HardRoutedPage() {
-  const s = useRestoration(api.restoreHard);
+export default function SoftMoEPage() {
+  const s = useRestoration(api.restoreSoft);
   const r = s.result;
-  const [view, setView] = useState("restored");            // "restored" | "error"
+  const [view, setView] = useState("restored");
   const showError = view === "error" && r?.reference_available;
+  const named = r ? Object.entries(r.weights).map(([k, v]) => [BRANCH_NAMES[k], v]) : [];
 
   const viewSwitch = r?.reference_available && (
     <span className="flex gap-1 normal-case tracking-normal">
@@ -27,7 +29,7 @@ export default function HardRoutedPage() {
 
   return (
     <WorkspaceLayout>
-      <PageHeader number={2} title="Hard-Routed Restoration" description="A classifier picks one specialist autoencoder for each image." />
+      <PageHeader number={3} title="Soft Mixture-of-Experts Restoration" description="A gate blends all specialists with continuous weights." />
       <ErrorBanner message={s.error} onClose={() => s.setError(null)} />
 
       <div className="grid grid-cols-2 gap-6">
@@ -44,26 +46,24 @@ export default function HardRoutedPage() {
         <ImagePanel label="Input" src={s.inputImage} empty="Awaiting source image" icon={<FrameIcon width={22} height={22} />} />
         <ImagePanel label={showError ? "Error map" : "Restored"} src={showError ? r.error_map_image : r?.output_image}
           busy={s.phase === "restoring"} footer={showError ? <ErrorLegend /> : null}
-          empty={s.phase === "restoring" ? "Running classifier and expert" : "Awaiting restoration"} icon={<WandIcon width={22} height={22} />}>
+          empty={s.phase === "restoring" ? "Running gate and experts" : "Awaiting restoration"} icon={<WandIcon width={22} height={22} />}>
           {viewSwitch}
         </ImagePanel>
-
         <section className="flex min-w-0 flex-col">
-          <div className="label mb-2 flex h-5 items-center">Routing</div>
+          <div className="label mb-2 flex h-5 items-center">Expert weights</div>
           <div className="flex h-[330px] flex-col rounded-panel border border-line bg-panel p-5">
             {r ? (
               <>
-                <RoutingBars values={Object.fromEntries(Object.entries(r.probabilities).map(([k, v]) => [CLASS_NAMES[k], v]))}
-                  highlight={CLASS_NAMES[r.predicted_class]} />
-                <div className="mt-auto flex flex-col gap-2 border-t border-line pt-4">
-                  <div className="flex justify-between"><span className="label">Predicted</span><span className="text-[14px] text-ink">{CLASS_NAMES[r.predicted_class]}</span></div>
-                  <div className="flex justify-between"><span className="label">Selected expert</span><span className="text-[14px] text-accent">{EXPERT_NAMES[r.selected_expert]}</span></div>
+                <RoutingBars values={Object.fromEntries(named)} highlight={BRANCH_NAMES[r.dominant_branch]} />
+                <div className="mt-auto border-t border-line pt-4">
+                  <div className="label">Top contributors</div>
+                  <div className="mt-1.5 text-[14px] text-ink">{r.top_contributors.map((b) => BRANCH_NAMES[b]).join(", ")}</div>
                 </div>
               </>
             ) : (
               <div className="flex flex-1 items-center justify-center">
                 <span className={`label text-center ${s.phase === "restoring" ? "animate-pulse" : ""}`}>
-                  {s.phase === "restoring" ? "Classifying" : "Classifier probabilities appear here"}
+                  {s.phase === "restoring" ? "Computing weights" : "Routing weights appear here"}
                 </span>
               </div>
             )}
@@ -71,15 +71,21 @@ export default function HardRoutedPage() {
         </section>
       </div>
 
-      {s.busy && <ProgressStatus startedAt={s.startedAt} label={s.phase === "applying" ? "Applying corruption" : "Running classifier and expert"} />}
+      {s.busy && <ProgressStatus startedAt={s.startedAt} label={s.phase === "applying" ? "Applying corruption" : "Running gate and experts"} />}
       {r && !s.busy && (
-        <ResultStrip downloadUrl={r.output_image} downloadName="hard_routed_restoration.png"
-          items={[...settingsItems(r, s.alreadyCorrupted),
-            ["Route", EXPERT_NAMES[r.selected_expert]],
-            ["Inference time", `${r.timing_ms.inference.toFixed(1)} ms`]]} />
-      )}
-      {r && !r.reference_available && !s.busy && (
-        <p className="mt-3 text-[13px] text-muted">No error map: the clean original of an already-corrupted upload is unknown.</p>
+        <>
+          <section className="mt-6">
+            <div className="label mb-2">Routing</div>
+            <div className="rounded-panel border border-line bg-panel px-6 py-4">
+              <RoutingDiagram weights={named} dominant={BRANCH_NAMES[r.dominant_branch]} />
+            </div>
+          </section>
+          <ResultStrip downloadUrl={r.output_image} downloadName="soft_moe_restoration.png"
+            items={[...settingsItems(r, s.alreadyCorrupted), ["Inference time", `${r.timing_ms.inference.toFixed(1)} ms`]]} />
+          {!r.reference_available && (
+            <p className="mt-3 text-[13px] text-muted">No error map: the clean original of an already-corrupted upload is unknown.</p>
+          )}
+        </>
       )}
     </WorkspaceLayout>
   );
