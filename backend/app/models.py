@@ -9,7 +9,7 @@ import time
 import numpy as np
 import onnxruntime as ort
 
-from .config import MODEL_FILES, MODELS_DIR
+from .config import MODEL_DOWNLOADS, MODEL_FILES, MODELS_DIR
 
 LFS_MAGIC = b"version https://git-lfs"
 
@@ -26,6 +26,9 @@ class ModelStore:
             info = {"description": description, "file": path.name, "loaded": False, "lfs_pointer": False}
             if not path.exists():
                 info["error"] = "file not found"
+                if name in MODEL_DOWNLOADS:   # large model: tell the user where to get it
+                    info["error"] += f" - download it into models/onnx/ from {MODEL_DOWNLOADS[name]}"
+                    info["download_url"] = MODEL_DOWNLOADS[name]
             else:
                 info["size_mb"] = round(path.stat().st_size / 1e6, 2)
                 with open(path, "rb") as f:

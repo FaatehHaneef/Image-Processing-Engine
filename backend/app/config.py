@@ -22,3 +22,8 @@ MODEL_FILES = {
     "task3_soft_moe": "Task 3 soft mixture-of-experts (whole pipeline)",
     "task4_generator": "Task 4 face-to-sketch generator",
 }
+
+# Models too large for the git repository (> 50 MB) are published as GitHub Release assets.
+MODEL_DOWNLOADS = {
+    "task4_generator": "https://github.com/FaatehHaneef/Image-Processing-Engine/releases/download/models-v1/task4_generator.onnx",
+}
