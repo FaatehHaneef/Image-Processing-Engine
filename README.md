@@ -1,160 +1,222 @@
-# Image Processing Engine
+# 🖼️ Image Processing Engine
 
-**Four generative models for repairing damaged photos and drawing faces, in one web app.**
+**Four AI models that repair damaged photos and turn faces into sketches, all in one web app.**
 
-Upload an image (or pick a sample), damage it with noise, blur or missing patches, and watch three different restoration strategies repair it. Or turn a face photo into a pencil sketch in one of three artist styles. Everything runs locally with a single Docker command.
-
-<p align="center">
-  <img src="docs/figures/task3_routing_heatmap.png" width="48%" alt="Soft mixture-of-experts routing weights">
-  <img src="docs/figures/task4_examples.png" width="40%" alt="Face-to-sketch examples in three styles">
-</p>
+You give it a photo, damage it (noise, blur or black patches), and see how three different AI approaches repair it. Or you give it a face and get a pencil sketch back in one of three artist styles. Everything runs on your own computer with one command.
 
 ---
 
-## The four models
+## ✨ What's inside
 
-| | Workspace | What it does | How |
+| | Workspace | In one sentence |
+|---|---|---|
+| 🧹 | **Universal Restoration** | One model tries to fix *any* kind of damage on its own. |
+| 🔀 | **Hard-Routed Restoration** | First figure out *what* is wrong, then send the photo to the one specialist for that problem. |
+| 🎛️ | **Soft Mixture-of-Experts** | Ask *all* specialists and blend their answers, trusting some more than others. |
+| ✏️ | **Face-to-Sketch Generator** | Turn a face photo into a sketch, in the style you pick. |
+
+### 🩹 The kinds of damage
+
+| | Damage | What it looks like | Low → Medium → High |
 |---|---|---|---|
-| 1 | **Universal Restoration** | One model fixes every kind of damage | A convolutional autoencoder squeezes the image through a small 8×8 "bottleneck" and rebuilds it clean |
-| 2 | **Hard-Routed Restoration** | Detect the damage first, then call a specialist | A CNN classifier picks *clean / noise / blur / occlusion* and sends the image to exactly one specialist autoencoder (clean images are passed through untouched) |
-| 3 | **Soft Mixture-of-Experts** | Blend all specialists instead of picking one | A gate network gives every branch a weight and mixes their outputs; fine-tuned end to end |
-| 4 | **Face-to-Sketch Generator** | Photo → sketch in Style 1, 2 or 3 | A style-conditioned pix2pix GAN (U-Net generator + PatchGAN discriminator) |
-
-The three damage types, at three severities each:
-
-| Damage | Low | Medium | High |
-|---|---|---|---|
-| Salt-and-pepper noise (share of pixels) | 3% | 8% | 15% |
-| Gaussian blur (kernel, sigma) | 3, 0.7 | 5, 1.5 | 7, 2.5 |
-| Black rectangles (count, area covered) | 1, ~10% | 2, ~20% | 3, ~35% |
+| 🧂 | **Salt-and-pepper noise** | random black and white dots | 3% → 8% → 15% of pixels |
+| 🌫️ | **Gaussian blur** | the photo is out of focus | slight → medium → strong |
+| ⬛ | **Occlusion** | black boxes hide parts of the photo | 1 box (~10%) → 2 (~20%) → 3 (~35%) |
 
 ---
 
-## How it fits together
+## 🔄 The pipeline: from data to app
 
 ```mermaid
 flowchart LR
-    subgraph Training["Training (local GPU, PyTorch)"]
-        D[Datasets<br/>Oxford-IIIT Pet · FS2K] --> P[Data pipeline<br/>runtime corruptions,<br/>fixed val/test manifests]
-        P --> O[Optuna<br/>hyperparameter search]
-        O --> T[Final training]
-        T --> E[Test evaluation<br/>run once per model]
-        T --> X[ONNX export<br/>+ check vs PyTorch]
-        O -.logged.-> M[(MLflow)]
-        T -.logged.-> M
-        E -.logged.-> M
-    end
-    subgraph App["App (Docker, CPU only)"]
-        B[Browser<br/>React + Tailwind] --> N[nginx]
-        N -->|/api| F[FastAPI]
-        F --> R[ONNX Runtime<br/>7 models]
-    end
-    X --> R
+    A["📂 Datasets<br/>pet photos · face sketches"] --> B["🩹 Add damage<br/>on the fly"]
+    B --> C["🔍 Optuna<br/>finds the best settings"]
+    C --> D["🏋️ Train<br/>the final model"]
+    D --> E["📊 Test once<br/>on unseen images"]
+    D --> F["📦 Export to ONNX<br/>portable model file"]
+    F --> G["🌐 Web app<br/>in Docker"]
+    C -.-> H[("📈 MLflow<br/>logs every run")]
+    D -.-> H
+    E -.-> H
 ```
 
-**Training side.** Images are damaged on the fly every time they are loaded, so the models never see the same corrupted copy twice. Validation and test damage is fixed in advance (stored "manifests"), so every model is judged on exactly the same 36,690 test inputs. Each model's settings were tuned with Optuna, every run was logged in MLflow, and the test set was used once, at the very end.
+**In plain words:**
 
-**App side.** The trained models are exported to ONNX, a portable format that runs fast on a normal CPU without PyTorch. A FastAPI backend loads them and applies damage with the *same code* used in training; a React frontend shows the results.
-
-![Application architecture](docs/figures/diagram_app.png)
-
----
-
-## Model architectures
-
-**Task 1: universal autoencoder.** The encoder shrinks the image from 128×128 to an 8×8 grid of 2,048 numbers (24× fewer values than the input); the decoder rebuilds it. There are no shortcuts around this bottleneck, so the model has to learn what a clean image looks like.
-
-![Task 1 autoencoder](docs/figures/diagram_task1_autoencoder.png)
-
-**Task 2: classifier + specialists.** A small CNN identifies the damage, then one of three autoencoders (each trained only on its own damage type) repairs it. If the image is clean, it is returned unchanged.
-
-**Task 3: soft mixture-of-experts.** The Task 2 classifier becomes a "gate" that weights four branches: the original image, plus the three specialists. The output is their weighted sum, so the model can, for example, keep 80% of a mildly blurred photo and only lightly sharpen it.
-
-![Task 3 soft mixture-of-experts](docs/figures/diagram_task3_soft_moe.png)
-
-**Task 4: face-to-sketch GAN.** A U-Net generator draws the sketch; a PatchGAN discriminator judges small patches as real or fake. The chosen style is a learned embedding fed into *both* networks, so it genuinely changes the drawing.
-
-![Task 4 cGAN](docs/figures/diagram_task4_cgan.png)
+1. 📂 **Data:** pet photos (Oxford-IIIT Pet) for the repair tasks, and face photos with artist sketches (FS2K) for the sketch task.
+2. 🩹 **Damage on the fly:** every time a photo is loaded during training, it gets a fresh random damage, so the models never memorise one fixed version. The test photos get *fixed* damage, so all models are compared on exactly the same 36,690 images.
+3. 🔍 **Optuna** tries many combinations of settings (learning rate, model size, …) and keeps the best one.
+4. 🏋️ **Training** builds the final model with those settings.
+5. 📊 **Testing** happens once, at the very end, on images the model has never seen.
+6. 📦 **ONNX export** saves each model in a portable format that runs fast on a normal CPU, no GPU needed.
+7. 📈 **MLflow** keeps a record of every experiment along the way.
 
 ---
 
-## Results (official test sets)
+## 🏗️ How the app is built
 
-| Model | Corrupted inputs: SSIM | PSNR | Notes |
+```mermaid
+flowchart LR
+    U["🧑 You<br/>in the browser"] <--> FE["🎨 Frontend<br/>React + Tailwind<br/>(nginx)"]
+    FE <-->|"/api"| BE["⚙️ Backend<br/>FastAPI"]
+    BE --> M["🧠 7 AI models<br/>ONNX Runtime · CPU"]
+    BE --> S["🖼️ Sample images"]
+```
+
+- 🎨 The **frontend** is the website you click around in.
+- ⚙️ The **backend** receives your photo, checks it, applies damage using the *same code* as training, and runs the models.
+- 🧠 The **models** are the 7 exported files: 1 universal repairer, 1 damage classifier, 3 specialists, 1 mixture model and 1 sketch generator.
+- 🐳 **Docker** packs both parts into containers, so the whole thing starts with one command on any computer.
+
+---
+
+## 🧠 How each model works
+
+### 🧹 1. Universal Restoration: one model for everything
+
+```mermaid
+flowchart LR
+    A["Damaged photo<br/>128×128"] --> B["Encoder<br/>shrinks it step by step"]
+    B --> C["🔒 Bottleneck<br/>tiny summary<br/>(24× smaller)"]
+    C --> D["Decoder<br/>rebuilds the photo"]
+    D --> E["Repaired photo"]
+```
+
+The model has to squeeze the whole photo into a tiny summary and rebuild it from there. Noise and damage don't fit through that squeeze, so they get removed. The catch: fine details don't fit either, so results look a little soft.
+
+### 🔀 2. Hard-Routed Restoration: diagnose, then treat
+
+```mermaid
+flowchart LR
+    A["Damaged photo"] --> C{"🔍 Classifier<br/>what's wrong?"}
+    C -->|clean| I["✅ Keep as is"]
+    C -->|noise| S["🧂 Noise specialist"]
+    C -->|blur| B["🌫️ Blur specialist"]
+    C -->|boxes| O["⬛ Occlusion specialist"]
+    I --> R["Result"]
+    S --> R
+    B --> R
+    O --> R
+```
+
+A classifier (99.8% accurate) decides what kind of damage the photo has and sends it to the one specialist trained for exactly that. Clean photos skip the repair step completely, so they come out perfect.
+
+### 🎛️ 3. Soft Mixture-of-Experts: blend everyone's answer
+
+```mermaid
+flowchart LR
+    A["Damaged photo"] --> G["🎛️ Gate<br/>decides the weights"]
+    A --> I["Original photo"]
+    A --> S["🧂 Noise specialist"]
+    A --> B["🌫️ Blur specialist"]
+    A --> O["⬛ Occlusion specialist"]
+    G -.weights.-> M
+    I --> M(("➕ Weighted<br/>mix"))
+    S --> M
+    B --> M
+    O --> M
+    M --> R["Result"]
+```
+
+Instead of picking one specialist, a "gate" gives each option a weight (e.g. 80% original photo + 20% blur specialist) and mixes them. It learned on its own to keep more of the original when the damage is mild, which made it the **best** of the three repair models.
+
+### ✏️ 4. Face-to-Sketch Generator: an artist and a critic
+
+```mermaid
+flowchart LR
+    P["📷 Face photo"] --> G["🎨 Generator<br/>(U-Net)<br/>draws the sketch"]
+    St["🖌️ Style 1 / 2 / 3"] --> G
+    G --> SK["✏️ Sketch"]
+    SK --> D{"🧐 Discriminator<br/>(PatchGAN)<br/>real or fake?"}
+    P --> D
+    St --> D
+    RS["Real artist sketch"] --> D
+    D -.feedback.-> G
+```
+
+Two networks train against each other: the **generator** draws sketches, and the **discriminator** tries to tell its sketches apart from real artist drawings. Over time the generator gets better at fooling it. The chosen style goes into both networks, so the same face really comes out differently in each style.
+
+---
+
+## 📊 Results
+
+How well each repair model does on the test photos (higher is better):
+
+| | Model | Similarity to original (SSIM) | Image quality (PSNR) |
 |---|---|---|---|
-| Damaged input (no repair) | 0.639 | 19.7 dB | baseline |
-| 1. Universal autoencoder | 0.806 | 25.5 dB | removes noise well; slightly softens clean images |
-| 2. Hard routing | 0.808 | 24.9 dB | classifier 99.8% accurate; clean images kept perfectly |
-| 3. Soft mixture-of-experts | **0.845** | **26.2 dB** | best overall; learned to keep more of the original for mild damage |
+| 🩹 | Damaged photo, no repair | 0.639 | 19.7 dB |
+| 🧹 | Universal Restoration | 0.806 | 25.5 dB |
+| 🔀 | Hard-Routed Restoration | 0.808 | 24.9 dB |
+| 🎛️ | **Soft Mixture-of-Experts** | **0.845** 🏆 | **26.2 dB** 🏆 |
 
-**Task 4:** test SSIM 0.498. The same face looks clearly different in each style (light lines, heavy shading, soft tones).
-
-All seven ONNX models match their PyTorch originals to within 0.00003 on real images. Full tables, figures and analysis are in [`docs/report_material.md`](docs/report_material.md) and the report.
-
-![Task 1 examples: clean, damaged, restored, error map](docs/figures/task1_examples.png)
+- 🔍 The damage classifier picks the right specialist **99.8%** of the time.
+- ✏️ The sketch generator produces clearly different drawings for the three styles: light lines, heavy shading, soft grey tones.
+- ✅ Every exported model gives the same answers as the original training code (difference below 0.00003).
 
 ---
 
-## Run it
+## 🚀 Run it yourself
 
-You need [Git](https://git-scm.com/) and [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running). No Python or Node required.
+**You need:** 🔧 [Git](https://git-scm.com/) and 🐳 [Docker Desktop](https://www.docker.com/products/docker-desktop/) (open and running). No Python or programming setup needed.
 
-**1. Clone the repository**
+**1️⃣ Get the code**
 ```bash
 git clone https://github.com/FaatehHaneef/Image-Processing-Engine.git
 cd Image-Processing-Engine
 ```
 
-**2. Download the sketch model** (168 MB, too large for GitHub; all other models are already included)
+**2️⃣ Download the sketch model** (168 MB, too big to store on GitHub directly)
 ```bash
 curl -L -o models/onnx/task4_generator.onnx https://github.com/FaatehHaneef/Image-Processing-Engine/releases/download/models-v1/task4_generator.onnx
 ```
-On Windows PowerShell write `curl.exe` instead of `curl`. Or download it manually from the [release page](https://github.com/FaatehHaneef/Image-Processing-Engine/releases/tag/models-v1) into `models/onnx/`. Without it, the other three workspaces still work.
+On Windows PowerShell, type `curl.exe` instead of `curl`. You can also download it from the [release page](https://github.com/FaatehHaneef/Image-Processing-Engine/releases/tag/models-v1) and put it in `models/onnx/`.
 
-**3. Start**
+**3️⃣ Start the app**
 ```bash
 docker compose up --build
 ```
-The first start takes a few minutes. Then open **http://localhost:8080**. The top-right corner shows **Models loaded** when everything is ready. Stop with `Ctrl+C` and `docker compose down`.
+⏳ The first start takes a few minutes. Then open 👉 **http://localhost:8080**
 
-### What you can try
-- Pick a sample or upload your own JPG/PNG (up to 10 MB); in Face-to-Sketch you can also use your webcam.
-- Choose a damage type and severity and click **Apply corruption**, or mark your upload as already damaged.
-- Compare outputs, error maps, classifier probabilities (Hard-Routed) and mixture weights with a routing diagram (Soft-MoE).
-- Download any result.
+When the top-right corner shows 🟢 **Models loaded**, you're ready. To stop: press `Ctrl+C`, then run `docker compose down`.
 
----
-
-## Repository layout
-
-```
-src/            shared code: data pipeline, corruptions, models, losses, metrics, Optuna/MLflow helpers
-scripts/        data preparation, Optuna searches, training, evaluation, ONNX export and verification
-configs/        the final settings chosen by Optuna for each model
-artifacts/      fixed data splits, test/validation manifests, Optuna studies, result tables
-models/onnx/    the exported models used by the app
-backend/        FastAPI app, sample images, tests, Dockerfile
-frontend/       React + Tailwind app, nginx config, Dockerfile
-docs/           design decisions, API contract, dataset notes, figures, AI-use log
-tests/          unit tests (pytest)
-```
+### 🎮 Things to try
+- 📤 Upload your own photo (JPG/PNG, up to 10 MB) or pick one of the samples.
+- 🩹 Choose a damage type and strength, click **Apply corruption**, then **Restore**.
+- 👀 Compare the result, the error map, the classifier's guesses and the mixture weights.
+- 📷 In Face-to-Sketch, try your webcam and switch between the three styles.
+- 💾 Download any result.
 
 ---
 
-## Retraining (optional)
+## 📁 What's in the repository
 
-Training needs an NVIDIA GPU (developed on a 4 GB RTX 3050 Ti) and the two datasets, which are not included.
-
-1. Create a Python 3.11 environment and install PyTorch with CUDA, then `pip install -r requirements.txt`.
-2. Put the [Oxford-IIIT Pet](https://www.robots.ox.ac.uk/~vgg/data/pets/) dataset in `data/oxford-iiit-pet/` and [FS2K](https://github.com/DengPingFan/FS2K) in `data/fs2k/FS2K/`.
-3. Run `python scripts/prepare_data.py` (splits, caches, manifests), then for each task the `optuna_*`, `train_*` and `evaluate_*` scripts in `scripts/`, and finally `export_onnx.py --all` and `verify_onnx.py --all`.
-
-Experiment history: `mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db`, then open http://127.0.0.1:5000 (choose the "Model training" view).
+| Folder | Contents |
+|---|---|
+| 📦 `src/` | shared code: data loading, damage functions, models, training helpers |
+| 🛠️ `scripts/` | data preparation, Optuna searches, training, testing, ONNX export |
+| ⚙️ `configs/` | the best settings Optuna found for each model |
+| 📊 `artifacts/` | data splits, fixed test damage, Optuna studies, result tables |
+| 🧠 `models/onnx/` | the exported models the app uses |
+| ⚙️ `backend/` | the FastAPI server, sample images, tests |
+| 🎨 `frontend/` | the React website |
+| 📝 `docs/` | design decisions, figures and notes |
+| ✅ `tests/` | automated tests |
 
 ---
 
-## Credits
+## 🔁 Retraining (optional)
 
-- **Oxford-IIIT Pet Dataset**: Parkhi, Vedaldi, Zisserman and Jawahar, "Cats and Dogs", CVPR 2012 (CC BY-SA 4.0). The 16 bundled pet samples are resized test-set images.
-- **FS2K**: Fan et al., "Facial-Sketch Synthesis: A New Challenge", Machine Intelligence Research, 2022. The 6 bundled face samples are resized test photos.
-- Interface designed in Google Stitch; landing-page illustrations are design artwork, not model outputs.
+Only needed if you want to train the models again yourself. It requires an NVIDIA GPU (built on a 4 GB RTX 3050 Ti) and the two datasets, which aren't included.
+
+1. Create a Python 3.11 environment, install PyTorch with CUDA, then `pip install -r requirements.txt`.
+2. Put [Oxford-IIIT Pet](https://www.robots.ox.ac.uk/~vgg/data/pets/) in `data/oxford-iiit-pet/` and [FS2K](https://github.com/DengPingFan/FS2K) in `data/fs2k/FS2K/`.
+3. Run `python scripts/prepare_data.py`, then the `optuna_*`, `train_*` and `evaluate_*` scripts for each task, and finally `export_onnx.py --all`.
+
+📈 To browse the experiment history: `mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db`, then open http://127.0.0.1:5000 and choose **Model training**.
+
+---
+
+## 🙏 Credits
+
+- **Oxford-IIIT Pet Dataset**: Parkhi et al., "Cats and Dogs", CVPR 2012 (CC BY-SA 4.0). The 16 sample pet photos come from its test set.
+- **FS2K**: Fan et al., "Facial-Sketch Synthesis: A New Challenge", 2022. The 6 sample faces come from its test set.
+- Interface designed with Google Stitch.
