@@ -87,7 +87,7 @@ def draw(indices, df, g, device, photos, sketches, styles, title, path):
             axes[row, j].set_title(label, fontsize=8)
             axes[row, j].axis("off")
     fig.suptitle(title)
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.97))   # leave room for the title above the first row
     fig.savefig(path, dpi=110)
     plt.close(fig)
 
@@ -97,19 +97,24 @@ def main():
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--dry-run", action="store_true", help="evaluate on the VALIDATION pairs instead of test")
     ap.add_argument("--checkpoint", default=str(C.CHECKPOINTS / "task4_generator.pt"))
+    ap.add_argument("--figures-only", action="store_true",
+                    help="redraw the figures from the saved per-image results (no re-evaluation)")
     args = ap.parse_args()
     out_dir = C.ARTIFACTS / "logs" / "dryrun" if args.dry_run else C.RESULTS
     fig_dir = out_dir if args.dry_run else C.FIGURES
     out_dir.mkdir(parents=True, exist_ok=True)
     per_image = out_dir / f"{PREFIX}_test_per_image.csv"
-    if per_image.exists() and not (args.force or args.dry_run):
+    if per_image.exists() and not (args.force or args.dry_run or args.figures_only):
         sys.exit(f"{per_image} exists: the test set was already evaluated. Use --force to re-run.")
 
     device = get_device()
     g = load_generator(args.checkpoint).to(device)
     records, photos, sketches, styles = load_split_tensors("val" if args.dry_run else "test")
-    df = evaluate(g, device, records, photos, sketches, styles)
-    df.to_csv(per_image, index=False)
+    if args.figures_only:
+        df = pd.read_csv(per_image)
+    else:
+        df = evaluate(g, device, records, photos, sketches, styles)
+        df.to_csv(per_image, index=False)
     table = summaries(df)
     table.to_csv(out_dir / f"{PREFIX}_test_summary.csv", index=False)
     (out_dir / f"{PREFIX}_test_table.tex").write_text(latex(table))
@@ -130,7 +135,7 @@ def main():
 
     pd.set_option("display.width", 200)
     print(table.round(4).to_string(index=False))
-    if args.dry_run:
+    if args.dry_run or args.figures_only:
         return
     setup_mlflow("task4-face-to-sketch")
     with mlflow.start_run(run_name="test-evaluation"):

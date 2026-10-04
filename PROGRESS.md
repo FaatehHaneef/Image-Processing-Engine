@@ -64,11 +64,18 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
   - ONNX `task4_generator.onnx` 167.9 MB, verified (7.2e-7), LOCAL ONLY (needs a download link before submission).
   - All 7 models load in the backend (health "ok"); Face-to-Sketch workspace works for real.
 
+- **Phase 7, Docker + README (2026-10-04)**
+  - `docker-compose.yml`: backend (python:3.11.13-slim-bookworm, CPU onnxruntime, non-root) + frontend (node:22.19.0-alpine build -> nginx:1.29.1-alpine, /api proxied to backend:8000). Models mounted read-only. App: http://localhost:8080.
+  - Images: backend 448 MB, frontend 82 MB. Docker usage: build cache 842 MB, images 2.77 GB (incl. the user's own n8n image).
+  - Fresh clone from GitHub + README steps -> healthy, 7/7 models, 36/36 navigation checks.
+  - Large model `task4_generator.onnx` is a GitHub Release asset (models-v1); README has the download command; /api/health points to it if missing.
+  - `docs/report_material.md` indexes every figure/table per task.
+
 ## In progress
-- Nothing running on the GPU.
+- Nothing running. The app runs in Docker at http://localhost:8080 (`docker compose down` to stop).
 
 ## Next
-- Phase 7: Docker Compose (backend + frontend), fresh-clone test, README (incl. download link for task4_generator.onnx), report material.
+- Student: report (IEEE LaTeX), demo video (5-7 min), AI-use appendix (from docs/ai_use_log.md), app/MLflow screenshots, confirm the deadline.
 - `Stitch Screens/` folder still uncommitted (move to docs/stitch/?).
 - Planned upgrades: see `docs/planned_upgrades.md`.
 
