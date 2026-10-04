@@ -1,6 +1,6 @@
 # Image Restoration and Style-Conditioned Face-to-Sketch Generation with Autoencoders, Mixture-of-Experts and Conditional GANs
 
-**[Author name], [Student ID], [Institution / Department]**
+**Syed Muhammad Faateh Haneef (23i-0688)**
 
 GitHub repository: https://github.com/FaatehHaneef/Image-Processing-Engine
 Demonstration video: [YouTube link]
@@ -9,7 +9,7 @@ Demonstration video: [YouTube link]
 
 ## Abstract
 
-This work designs, trains, evaluates and deploys four related generative systems. Three of them restore 128×128 images from the Oxford-IIIT Pet dataset corrupted at runtime by salt-and-pepper noise, Gaussian blur or rectangular occlusion: (1) a single universal convolutional denoising autoencoder with a compressed latent bottleneck, (2) a hard-routed system in which a CNN classifier sends each image to one of three specialist autoencoders or to an identity bypass, and (3) a soft mixture-of-experts in which a gate, initialized from the classifier, blends identity and the three specialists with continuous weights and is fine-tuned end to end. The fourth system is a style-conditioned pix2pix conditional GAN that turns FS2K face photographs into sketches in three artist styles. All hyperparameters were tuned with Optuna, all experiments were tracked with MLflow, and every inference model was exported to ONNX and verified against PyTorch. On the official test set, the universal autoencoder raises corrupted-input SSIM from 0.639 to 0.806, hard routing reaches 99.83% classifier accuracy and preserves clean images exactly, and the soft mixture-of-experts gives the best restoration (SSIM 0.845, PSNR 26.18 dB) by learning to blend the original image back in for mild corruptions. The GAN generates visibly distinct styles for the same face (test SSIM 0.498). The models are served by a FastAPI/ONNX Runtime backend and a React/Tailwind frontend designed in Google Stitch, and the whole application starts with one Docker Compose command.
+This work designs, trains, evaluates and deploys four generative systems. Three restore 128×128 Oxford-IIIT Pet images corrupted at runtime by salt-and-pepper noise, Gaussian blur or occlusion: a universal convolutional denoising autoencoder with a compressed bottleneck, a hard-routed system in which a CNN classifier selects one of three specialist autoencoders or an identity bypass, and a soft mixture-of-experts in which a gate initialized from the classifier blends all branches and is fine-tuned end to end. The fourth is a style-conditioned pix2pix GAN that turns FS2K face photographs into sketches in three styles. All models were tuned with Optuna, tracked with MLflow, exported to ONNX and served by a FastAPI and React application started with Docker Compose. On the official test set, the universal autoencoder raises corrupted-input SSIM from 0.639 to 0.806, the hard-routing classifier is 99.83% accurate, and the soft mixture-of-experts performs best (SSIM 0.845) by learning to blend the original image back in for mild corruptions. The GAN produces visibly distinct styles for the same face.
 
 **Index Terms:** denoising autoencoder, image restoration, mixture of experts, conditional GAN, pix2pix, Optuna, ONNX, FastAPI.
 
@@ -17,9 +17,7 @@ This work designs, trains, evaluates and deploys four related generative systems
 
 ## I. Introduction
 
-Real photographs suffer from very different degradations: impulse noise, defocus blur and missing regions. A single model that removes all of them must learn one shared representation, while a collection of specialists needs a reliable way of deciding which specialist to use. This report studies that trade-off with three increasingly flexible restoration systems built on the same data and evaluated on the same fixed test inputs, so that their results are directly comparable. A fourth task applies paired image-to-image translation to a different problem: generating face sketches in a chosen artistic style.
-
-The contributions are: (i) a reproducible corruption pipeline with runtime training corruptions and deterministic validation and test manifests; (ii) a universal autoencoder, a hard-routed specialist system and a soft mixture-of-experts, compared per corruption and per severity; (iii) a style-conditioned conditional GAN with the style embedding inside both the generator and the discriminator; (iv) Optuna studies for all four tasks and MLflow tracking of every run; and (v) a containerized web application that serves all seven exported ONNX models.
+Real photographs suffer from very different degradations: impulse noise, defocus blur and missing regions. A single model that removes all of them must learn one shared representation, while a set of specialists needs a reliable way of choosing which one to use. We study this trade-off with three increasingly flexible restoration systems that share one data pipeline and are evaluated on the same fixed test inputs, so their results are directly comparable. A fourth task applies paired image-to-image translation to generating face sketches in a chosen artistic style. All four systems are integrated into one web application.
 
 ---
 
@@ -193,8 +191,6 @@ Only 63 of 36,690 inputs (0.17%) were routed to the wrong branch, in three group
 
 [FIGURE 8: `docs/figures/task2_misrouted.png` — worst misrouted inputs: target, input with probabilities, wrongly routed output, oracle output, error map.]
 
-[FIGURE 9: `docs/figures/task2_examples.png` — representative predicted-routing examples with probabilities and the selected branch.]
-
 ---
 
 ## VI. Task 3: Soft Mixture-of-Experts Restoration
@@ -207,7 +203,7 @@ $$w = \mathrm{softmax}(G(\tilde{x})/T), \qquad \hat{x} = w_0\tilde{x} + w_1A_{sa
 
 All branches run on every input and the weighted sum is differentiable, so the gate and the experts can be trained through the reconstruction error. The gate is initialized from the Task 2 classifier and the experts from the Task 2 specialists; no component starts from random weights.
 
-[FIGURE 10: Task 3 architecture diagram — input → gate (softmax with temperature) → weights w0..w3; identity + three expert autoencoders; weighted sum → output.]
+[FIGURE 9: Task 3 architecture diagram — input → gate (softmax with temperature) → weights w0..w3; identity + three expert autoencoders; weighted sum → output.]
 
 ### B. Training
 
@@ -219,7 +215,7 @@ where w̄_k is the mean weight of branch k in a batch. We kept the suggested bal
 
 Optuna tuned the joint learning rate (log [10⁻⁵, 3×10⁻⁴]), T ([0.5, 3]), λ_c (log [0.01, 1]), λ_b (log [0.001, 0.1]) and the reconstruction weighting λ₁ = s, λ_s = 1 − s with s ∈ [0.5, 0.95]. Trials used 2 warm-up and 6 joint epochs and were pruned by the median pruner or when routing collapsed on the balanced validation set (a branch with mean weight below 0.05 or above 0.5). The study ran 20 trials (16 completed, 4 pruned, 0 failed). The best trial (#17) used T = 2.63, joint learning rate 2.7×10⁻⁴, λ₁/λ_s = 0.59/0.41, λ_c = 0.010 and λ_b = 0.0011: both regularizers at the lower end of their ranges, i.e. the best mixture is the least constrained one. The final model (3 warm-up and 30 joint epochs) improved the validation score from 0.0860 (untouched Task 2 components) to 0.0702 and validation SSIM from 0.859 to 0.885, while the gate's top-1 agreement with the corruption label fell from 99.7% to 77.5%.
 
-[FIGURE 11: `docs/figures/task3_curves.png` — training loss, validation SSIM, gate accuracy and mean weight on the correct branch; the end of the warm-up is marked.]
+[FIGURE 10: `docs/figures/task3_curves.png` — training loss, validation SSIM, gate accuracy and mean weight on the correct branch; the end of the warm-up is marked.]
 
 ### C. Results
 
@@ -256,11 +252,9 @@ No expert is inactive: each receives at least 0.39 mean weight on its own inputs
 
 On the 63 inputs that hard routing sent to the wrong branch, the soft mixture is better in 95% of cases (mean SSIM 0.891 → 0.974), above even Task 2's oracle routing (0.947): clean photos that the classifier called blurred now receive 94% identity weight.
 
-[FIGURE 12: `docs/figures/task3_routing_heatmap.png` — mean routing weights per corruption and severity, and the distribution of the weight on the correct branch.]
+[FIGURE 11: `docs/figures/task3_routing_heatmap.png` — mean routing weights per corruption and severity, and the distribution of the weight on the correct branch.]
 
-[FIGURE 13: `docs/figures/task3_dominant_vs_distributed.png` — inputs with one dominant expert vs inputs with weights spread over several branches, with the weight bars.]
-
-[FIGURE 14: `docs/figures/task3_examples.png` — representative test examples.]
+[FIGURE 12: `docs/figures/task3_dominant_vs_distributed.png` — inputs with one dominant expert vs inputs with weights spread over several branches, with the weight bars.]
 
 ---
 
@@ -270,7 +264,7 @@ On the 63 inputs that hard routing sent to the wrong branch, the soft mixture is
 
 The generator is a pix2pix U-Net [11]: seven stride-2 4×4 convolution stages (widths b, 2b, 4b, 8b, 8b, 8b, 8b; 128 → 1 pixels) and six transposed-convolution stages with skip connections to the mirrored encoder layers, dropout in the three innermost decoder layers and a sigmoid output with one grayscale channel. Skip connections are appropriate here because photo and sketch share the same spatial layout. The style is a learned embedding of the three FS2K styles. It enters the generator twice, as a constant map concatenated to the photo and again at the 1×1 bottleneck, and it enters the discriminator as a map concatenated to the photo and the (real or generated) sketch. The discriminator is a 70×70 PatchGAN with base width 64, producing a 14×14 grid of real/fake logits for a 128×128 input. Weights are initialized from N(0, 0.02) as in pix2pix.
 
-[FIGURE 15: Task 4 architecture diagram — U-Net generator with style embedding at the input and the bottleneck; PatchGAN discriminator receiving photo, sketch and style map.]
+[FIGURE 13: Task 4 architecture diagram — U-Net generator with style embedding at the input and the bottleneck; PatchGAN discriminator receiving photo, sketch and style map.]
 
 ### B. Objective and Training
 
@@ -282,9 +276,7 @@ Adam (β₁ = 0.5) was used with a constant learning rate for the first half of 
 
 Optuna searched the generator and discriminator learning rates (log [5×10⁻⁵, 5×10⁻⁴] each), batch size {4, 8, 16}, generator base channels {32, 48, 64}, dropout [0, 0.5], embedding dimension {4, 8, 16, 32} and λ_L1 (log [10, 200]), with 20-epoch trials and the fixed validation score 0.5·L1 + 0.5·(1 − SSIM). The study ran 20 trials (19 completed, 1 pruned, 0 failed). The best trial (#11) used base 64, batch 8, learning rates 3.4×10⁻⁴ (G and D), dropout 0.33, embedding size 16 and λ_L1 = 152.6. Retrained for 150 epochs, the model reached its best validation score at epoch 55 (0.288, SSIM 0.513); later epochs drifted to 0.309. This is typical of GAN training: as the adversarial term pushes towards crisper strokes, pixel metrics, which reward averaged strokes, become slightly worse. The checkpoint was chosen on the validation set.
 
-[FIGURE 16: `docs/figures/task4_curves.png` — D real, D fake and G adversarial losses, G L1 loss and validation L1, validation SSIM per style.]
-
-[FIGURE 17: MLflow screenshot — the fixed validation samples at several epochs (run `final-train`, artifacts `samples/epoch_*.png`).]
+[FIGURE 14: `docs/figures/task4_curves.png` — D real, D fake and G adversarial losses, G L1 loss and validation L1, validation SSIM per style.]
 
 ### C. Results
 
@@ -297,17 +289,17 @@ Optuna searched the generator and discriminator learning rates (log [5×10⁻⁵
 | Style 2 | 381 | 0.142 | 0.411 | 13.10 | 0.110 |
 | Style 3 | 46 | 0.061 | 0.626 | 19.50 | 0.094 |
 
-"Style effect" is the mean absolute difference between the sketch generated with the true style and the sketches generated with the other two styles for the same photo. A value of 0.11 (11% of the grey range) confirms that the embedding controls the output. Fig. 18 shows the same photo rendered in all three styles: Style 1 produces light, thin lines, Style 2 dark and heavy shading, Style 3 soft grey tones, matching the artists' styles. Style 2 is the hardest (SSIM 0.41) because its dense shading is penalized heavily by pixel metrics whenever strokes are slightly displaced. Style-3 results rest on only 46 test images. Because style and photo source are linked in the training data, per-style numbers partly reflect photo sources (e.g. Style 1: SSIM 0.525 on one source, 0.583 on the other). Sketches are mostly white paper with thin lines, so L1 and SSIM penalize plausible strokes that are a few pixels off; visual inspection of the fixed validation samples complemented the metrics.
+"Style effect" is the mean absolute difference between the sketch generated with the true style and the sketches generated with the other two styles for the same photo. A value of 0.11 (11% of the grey range) confirms that the embedding controls the output. Fig. 15 shows the same photo rendered in all three styles: Style 1 produces light, thin lines, Style 2 dark and heavy shading, Style 3 soft grey tones, matching the artists' styles. Style 2 is the hardest (SSIM 0.41) because its dense shading is penalized heavily by pixel metrics whenever strokes are slightly displaced. Style-3 results rest on only 46 test images. Because style and photo source are linked in the training data, per-style numbers partly reflect photo sources (e.g. Style 1: SSIM 0.525 on one source, 0.583 on the other). Sketches are mostly white paper with thin lines, so L1 and SSIM penalize plausible strokes that are a few pixels off; visual inspection of the fixed validation samples complemented the metrics.
 
-[FIGURE 18: `docs/figures/task4_examples.png` — test photos, real sketches, generated sketches and the same photo in all three styles.]
+[FIGURE 15: `docs/figures/task4_examples.png` — test photos, real sketches, generated sketches and the same photo in all three styles.]
 
-[FIGURE 19: `docs/figures/task4_failures.png` — failure cases (lowest SSIM per style and highest L1).]
+[FIGURE 16: `docs/figures/task4_failures.png` — failure cases (lowest SSIM per style and highest L1).]
 
 ---
 
 ## VIII. Hyperparameter Optimization and Experiment Tracking
 
-Every task used Optuna with persistent SQLite storage (studies can be resumed), the TPE sampler with seed 42, the median pruner and short trials. Each objective was a fixed validation metric independent of the tuned loss weights; the test set never entered any objective, early-stopping decision or checkpoint choice. Out-of-memory errors and diverging runs were turned into pruned trials, so no single configuration could stop a study.
+All studies used persistent SQLite storage, the TPE sampler (seed 42), the median pruner and a fixed validation objective; the test set never entered any objective, early-stopping decision or checkpoint choice. Out-of-memory errors and diverging runs became pruned trials.
 
 **Table IX. Optuna studies.**
 
@@ -319,9 +311,9 @@ Every task used Optuna with persistent SQLite storage (studies can be resumed), 
 | Task 3 soft MoE | 20 | 16 | 4 | 0 | 2 + 6 | #17 |
 | Task 4 cGAN | 20 | 19 | 1 | 0 | 20 | #11 |
 
-MLflow tracked one experiment per task. Each Optuna study is a parent run with one nested run per trial (parameters, per-epoch metrics and the reason for pruning). Final training runs log their parameters, per-epoch losses and metrics, checkpoints and sample images, and each test evaluation is a separate run with its tables and figures.
+MLflow tracked one experiment per task: each study is a parent run with one nested run per trial, and final training and test-evaluation runs log parameters, per-epoch metrics, checkpoints, sample images and result tables.
 
-[FIGURE 20: MLflow screenshot — experiment list and an Optuna parent run with nested trial runs.]
+[FIGURE 17: MLflow screenshot — the four experiments and one Optuna parent run with its nested trial runs.]
 
 ---
 
@@ -349,17 +341,17 @@ All differences are far below one grey level (1/255 ≈ 3.9×10⁻³). The six s
 
 The interface was designed in Google Stitch before implementation: a landing page with one card per task, and three states (input, processing, result) for every workspace. The implementation follows the Stitch design system: a near-black background, graphite panels, a single steel-blue accent, a light serif for page titles, a sans-serif for interface text and monospace for labels and numbers. Interface text and numbers that appeared only as decoration in the mock-ups were not implemented.
 
-[FIGURE 21: Google Stitch designs — the landing page and the Universal Restoration workspace (input and result states).]
+[FIGURE 18: Google Stitch designs — the landing page and the Universal Restoration workspace (input and result states).]
 
-[FIGURE 22: Screenshots of the implemented application — landing page and the four workspaces.]
+[FIGURE 19: Screenshots of the implemented application — landing page and the four workspaces.]
 
 ### B. Architecture
 
-[FIGURE 23: Application architecture — browser → nginx (static React build) → /api → FastAPI → ONNX Runtime (CPU) → seven ONNX models mounted read-only.]
+[FIGURE 20: Application architecture — browser → nginx (static React build) → /api → FastAPI → ONNX Runtime (CPU) → seven ONNX models mounted read-only.]
 
-The frontend (React and Tailwind CSS) offers four workspaces with the names Universal Restoration, Hard-Routed Restoration, Soft Mixture-of-Experts Restoration and Face-to-Sketch Generator. A user can upload an image (JPEG or PNG up to 10 MB), choose a bundled sample, apply a corruption at the three test severities, or mark an upload as already corrupted. Corruptions are applied by the backend with the same code and settings as the test set; a seed returned with the preview ensures that the restored image is the previewed one. Results show the restored image, an error map when the clean original is known (it is never estimated for uploads that are already corrupted), the classifier probabilities with the predicted class and selected expert (Hard-Routed), the four mixture weights, the top contributors and a routing diagram whose line thickness follows the weights (Soft-MoE), the inference time and a download button. The Face-to-Sketch workspace accepts an upload or a webcam capture, with clear messages when camera access is denied or unavailable, and a choice of Style 1, 2 or 3.
+The React/Tailwind frontend has four workspaces: Universal Restoration, Hard-Routed Restoration, Soft Mixture-of-Experts Restoration and Face-to-Sketch Generator. Users upload an image or choose a sample, apply a corruption at the three test severities (applied by the backend with the training code) or mark an upload as already corrupted. Results show the restored image, an error map when the clean original is known, the classifier probabilities and selected expert (Hard-Routed), the mixture weights and a routing diagram (Soft-MoE), the inference time and a download button. Face-to-Sketch accepts an upload or a webcam capture and one of the three styles.
 
-The FastAPI backend validates uploads (type, size, decodability), applies the training preprocessing (RGB, bilinear resize to 128×128, scaling to [0, 1]), runs the ONNX models with ONNX Runtime on the CPU and returns images, routing information and timings. It provides health, sample, corruption, universal-restoration, hard-routing, soft-mixture and face-to-sketch endpoints. The health endpoint reports which models are loaded, detects Git LFS pointer files and names the download location of a missing large model. Single-image CPU inference took roughly 10-40 ms in our tests.
+The FastAPI backend validates uploads (type, size, decodability), applies the training preprocessing, runs the models with ONNX Runtime on the CPU and returns images, routing information and timings through health, sample, corruption, universal, hard-routing, soft-mixture and face-to-sketch endpoints. Single-image inference took roughly 10-40 ms.
 
 ### C. Deployment
 
@@ -411,11 +403,10 @@ Using one shared data pipeline and fixed test inputs, we compared three restorat
 
 ## Appendix A: Use of AI Tools
 
-**[Student: add every other AI tool you used, e.g. any chat assistant used for planning or for writing, and adjust the wording below.]**
-
 | Tool | Used for | How outputs were tested or corrected |
 |---|---|---|
-| Claude Code (Anthropic, model Claude Opus 5.5) | Planning and requirement analysis; data-pipeline, corruption, model, training, Optuna, evaluation and ONNX code; FastAPI backend; React frontend from the Stitch design; Docker configuration; documentation; first draft of this report | 39 unit and API tests (corruption definitions, manifest determinism, SSIM against scikit-image, routing, model properties, upload validation); every training and evaluation script was dry-run before real runs; the test set was evaluated once per model; ONNX outputs were compared numerically with PyTorch; the frontend was checked step by step against the Stitch screens and by an automated navigation test; the complete application was tested from a fresh clone. All code was reviewed by the student. |
-| Google Stitch | Interface design (layout, colours, components) | Used as the reference for the frontend; decorative placeholder text in the mock-ups was not implemented. |
+| Claude (web chat, Anthropic) | Early planning: understanding the assignment, choosing the overall approach and preparing the working instructions for the coding assistant | Plans were checked against the assignment PDF; decisions were revised during implementation when results or constraints required it |
+| Claude Code (Anthropic, Claude Opus 5.5) | Data pipeline, corruption, model, training, Optuna, evaluation and ONNX code; FastAPI backend; React frontend from the Stitch design; Docker configuration; documentation; first draft of this report | 39 unit and API tests (corruption definitions, manifest determinism, SSIM against scikit-image, routing, model properties, upload validation); dry runs before every real training and evaluation; test set evaluated once per model; ONNX outputs compared numerically with PyTorch; frontend compared step by step with the Stitch screens and checked with an automated navigation test; full application tested from a fresh clone. All code was reviewed by the student. |
+| Google Stitch | Interface design (layout, colours, components) | Used as the reference for the frontend; decorative placeholder text in the mock-ups was not implemented |
 
-Issues found and corrected during development included: a version-control rule that would have excluded the data-loading code from the repository; an ONNX exporter crash on Windows (console encoding); identical images chosen for one example figure; a model-size limit that was later reconsidered for Task 4; and errors in test scripts that produced false failures. Each was detected by a test or by inspection and fixed before results were produced. All reported numbers come from logged runs (MLflow and the files in `artifacts/results/`).
+Issues found and corrected during development included a version-control rule that would have excluded the data-loading code from the repository, an ONNX exporter crash on Windows, identical images chosen for one example figure, a model-size limit that was reconsidered for Task 4, and test-script errors that produced false failures. Each was detected by a test or by inspection and fixed before results were produced. All reported numbers come from logged runs (MLflow and `artifacts/results/`).
