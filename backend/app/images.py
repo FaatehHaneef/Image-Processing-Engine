@@ -77,3 +77,20 @@ def to_png_data_url(x: np.ndarray) -> str:
     buf = io.BytesIO()
     Image.fromarray(x).save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+# Error map colours: the UI theme's ramp (near-black -> steel blue -> white), so the map and its
+# LOW -> HIGH legend in the frontend match. Same fixed scale as the report figures (0 .. 0.5).
+ERROR_STOPS = np.array([[14, 15, 17], [122, 150, 186], [236, 240, 245]], dtype=np.float32)
+ERROR_VMAX = 0.5
+
+
+def error_map(output: np.ndarray, clean: np.ndarray) -> tuple[str, float]:
+    """|output - clean| averaged over RGB -> colour PNG + mean absolute error.
+    output: model output [3, H, W] in [0, 1]; clean: uint8 HxWx3 reference."""
+    err = np.abs(np.clip(output, 0, 1).transpose(1, 2, 0) - clean.astype(np.float32) / 255.0).mean(axis=2)
+    t = np.clip(err / ERROR_VMAX, 0, 1) * (len(ERROR_STOPS) - 1)        # position along the ramp
+    i = np.minimum(t.astype(int), len(ERROR_STOPS) - 2)
+    f = (t - i)[..., None]
+    rgb = ERROR_STOPS[i] * (1 - f) + ERROR_STOPS[i + 1] * f
+    return to_png_data_url(rgb.round().astype(np.uint8)), round(float(err.mean()), 5)

@@ -81,3 +81,22 @@ def test_upload_validation(client):
     bad_level = client.post("/api/restore/universal", data={"sample": "pets/beagle_54.jpg", "corruption": "salt",
                                                              "level": "extreme"})
     assert bad_level.status_code == 422
+
+
+def test_corrupt_preview_matches_restore_input(client):
+    """'Apply corruption' preview and the later restore use the same seed -> identical corrupted input."""
+    form = {"sample": "pets/beagle_54.jpg", "corruption": "occlusion", "level": "high", "seed": "3"}
+    prev = client.post("/api/corrupt", data=form).json()
+    assert len(prev["corruption"]["params"]["rects"]) == 3
+    rest = client.post("/api/restore/universal", data=form).json()
+    assert rest["input_image"] == prev["input_image"]
+
+
+def test_error_map_only_with_a_real_clean_reference(client):
+    sample = "pets/beagle_54.jpg"
+    applied = client.post("/api/restore/universal", data={"sample": sample, "corruption": "blur", "level": "low"}).json()
+    assert applied["reference_available"] and applied["error_map_image"].startswith("data:image/png")
+    clean_in = client.post("/api/restore/universal", data={"sample": sample, "input_is_clean": "true"}).json()
+    assert clean_in["reference_available"]
+    already = client.post("/api/restore/universal", files={"file": ("x.png", png_bytes(), "image/png")}).json()
+    assert not already["reference_available"] and already["error_map_image"] is None   # never faked

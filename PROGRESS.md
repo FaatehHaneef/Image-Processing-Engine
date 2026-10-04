@@ -49,7 +49,14 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
 - **Prepared in parallel (not yet run/finished):** Task 4 cGAN code; FastAPI backend (6 tests pass, samples, Dockerfile, allow-list .dockerignore); `--version v2` upgrade options for Tasks 1-3 (bigger models, own studies/checkpoints/outputs).
 - **Policy change (2026-10-04):** no model-size cap; ONNX files > 50 MB stay local (auto-listed in `models/onnx/.gitignore`), download link later. CLAUDE.md section 7 updated.
 
+- **Frontend, first 7 screens (2026-10-04, separate from phase work)**
+  - `frontend/` React 19 + Vite 8 + Tailwind 4 (fonts bundled locally: Newsreader, Inter, IBM Plex Mono). Theme tokens in `src/index.css` (colours sampled from the Stitch landing PNG).
+  - Screens: Landing; Universal Restoration and Hard-Routed Restoration (input / processing / result). Soft-MoE and Face-to-Sketch tabs open a "Design in progress" page; System page shows /api/health; Experiments links to MLflow (`VITE_MLFLOW_URL`).
+  - `docs/api_contract.md` = the backend API. New backend bits: `POST /api/corrupt`, error map only when a clean reference exists (`input_is_clean`), 16 pet samples. Mock mode `VITE_MOCK=1` (off by default, MOCK DATA badge).
+  - Run: backend `.venv\Scripts\python -m uvicorn backend.app.main:app --port 8000`; frontend `cd frontend; npm install; npm run dev` -> http://localhost:5173.
+
 ## In progress
+- Waiting for the Stitch screens of Soft Mixture-of-Experts and Face-to-Sketch Generator (3 each) before building those workspaces.
 - Phase 5 (Task 4) running automatically: smoke -> Optuna (20 trials, generator base 32/48/64) -> full training (150 epochs) -> test evaluation -> ONNX. ETA ~22:45-23:30 on 2026-10-04.
 
 ## Next
