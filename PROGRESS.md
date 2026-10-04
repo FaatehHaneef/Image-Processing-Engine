@@ -70,7 +70,7 @@ Resume guide: read `CLAUDE.md`, then `docs/explanation.md`, then `docs/implement
 ## Next
 - Phase 7: Docker Compose (backend + frontend), fresh-clone test, README (incl. download link for task4_generator.onnx), report material.
 - `Stitch Screens/` folder still uncommitted (move to docs/stitch/?).
-- Later: v2 upgrade pass for Tasks 1-3 (`--version v2`), after submission of the current versions.
+- Planned upgrades: see `docs/planned_upgrades.md`.
 
 ## Known issues / decisions pending
 - Global Python 3.11.7 has `torch 2.11.0+cpu`. Always use `.venv`.

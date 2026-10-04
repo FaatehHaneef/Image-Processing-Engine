@@ -16,7 +16,7 @@ export function Wordmark() {
   return (
     <Link to="/" className="flex shrink-0 items-center gap-3 text-[18px] text-ink whitespace-nowrap hover:text-white">
       <span className="h-2 w-2 rounded-full bg-dot" aria-hidden />
-      Image Restoration Engine
+      Image Processing Engine
     </Link>
   );
 }
